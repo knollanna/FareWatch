@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Add a New Watch</h2>
+
+<form method="POST">
+  <table cellpadding="6">
+    <tr>
+      <td><label for="origin">Origin airport code (e.g. JFK)</label></td>
+      <td><input type="text" id="origin" name="origin" maxlength="3"
+                 placeholder="JFK" required style="text-transform:uppercase"></td>
+    </tr>
+    <tr>
+      <td><label for="destination">Destination airport code (e.g. CDG)</label></td>
+      <td><input type="text" id="destination" name="destination" maxlength="3"
+                 placeholder="CDG" required style="text-transform:uppercase"></td>
+    </tr>
+    <tr>
+      <td><label for="date_from">Earliest departure date</label></td>
+      <td><input type="date" id="date_from" name="date_from" required></td>
+    </tr>
+    <tr>
+      <td><label for="date_to">Latest departure date</label></td>
+      <td><input type="date" id="date_to" name="date_to" required></td>
+    </tr>
+    <tr>
+      <td><label for="passengers">Number of passengers</label></td>
+      <td><input type="number" id="passengers" name="passengers"
+                 min="1" max="9" value="1" required></td>
+    </tr>
+    <tr>
+      <td><label for="target_price">Target price (USD, total)</label></td>
+      <td><input type="number" id="target_price" name="target_price"
+                 min="1" step="0.01" placeholder="500.00" required></td>
+    </tr>
+    <tr>
+      <td><label for="client_name">Client name</label></td>
+      <td><input type="text" id="client_name" name="client_name" required></td>
+    </tr>
+    <tr>
+      <td><label for="client_email">Client email</label></td>
+      <td><input type="email" id="client_email" name="client_email" required></td>
+    </tr>
+  </table>
+
+  <br>
+  <button type="submit">Add Watch</button>
+  <a href="/">Cancel</a>
+</form>
+
+{% endblock %}

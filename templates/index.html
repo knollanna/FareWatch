@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Active Watches</h2>
+
+{% if watches %}
+  <table border="1" cellpadding="6">
+    <thead>
+      <tr>
+        <th>Route</th>
+        <th>Travel Window</th>
+        <th>Passengers</th>
+        <th>Target Price</th>
+        <th>Latest Price</th>
+        <th>Checked</th>
+        <th>Alert</th>
+        <th>Client</th>
+        <th>Email</th>
+        <th>Created</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in watches %}
+      {% set lp = w.latest_price %}
+      {% set hit_target = lp and lp.price <= w.target_price %}
+      <tr{% if hit_target %} style="background:#d4edda"{% endif %}>
+        <td>{{ w.origin }} → {{ w.destination }}</td>
+        <td>{{ w.date_from }} – {{ w.date_to }}</td>
+        <td>{{ w.passengers }}</td>
+        <td>${{ "%.2f"|format(w.target_price) }}</td>
+        <td>
+          {% if lp %}
+            {% if hit_target %}
+              <strong>{{ lp.currency }} {{ "%.2f"|format(lp.price) }} ✓</strong>
+            {% else %}
+              {{ lp.currency }} {{ "%.2f"|format(lp.price) }}
+            {% endif %}
+          {% else %}
+            <em>Not checked yet</em>
+          {% endif %}
+        </td>
+        <td>
+          {% if lp %}{{ lp.checked_at[:10] }}{% else %}—{% endif %}
+        </td>
+        <td style="text-align:center">
+          {% if w.alert_sent_today %}
+            <span title="Alert email sent today">📧 Sent</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>{{ w.client_name }}</td>
+        <td>{{ w.client_email }}</td>
+        <td>{{ w.created_at[:10] }}</td>
+        <td>
+          <form method="POST" action="/deactivate/{{ w.id }}"
+                onsubmit="return confirm('Deactivate this watch?')">
+            <button type="submit">Deactivate</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No active watches yet. <a href="/add">Add one.</a></p>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,231 @@
+import os
+import urllib.parse
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "")
+
+
+def _google_flights_url(origin, destination, date_from, passengers, exact_date=None):
+    departure = exact_date[:10] if exact_date else date_from
+    q = f"{origin} to {destination} {departure}"
+    return f"https://www.google.com/travel/flights?q={urllib.parse.quote(q)}&curr=USD"
+
+
+
+
+def _format_datetime(dt_str):
+    """Turn '2026-06-12T09:45:00' into 'June 12, 2026 at 9:45am'."""
+    if not dt_str:
+        return dt_str
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(dt_str)
+        return dt.strftime("%-d %B %Y at %-I:%M%p").replace("AM", "am").replace("PM", "pm")
+    except Exception:
+        return dt_str
+
+
+def _build_email_html(watch, price, flight_details):
+    origin = watch["origin"]
+    destination = watch["destination"]
+    date_from = watch["date_from"]
+    date_to = watch["date_to"]
+    passengers = watch["passengers"]
+    target_price = float(watch["target_price"])
+    client_name = watch["client_name"]
+    currency = "USD"
+
+    pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
+    exact_date = flight_details["departing_at"] if flight_details else None
+    google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+
+    # Flight details rows (only shown if we have them)
+    flight_rows = ""
+    if flight_details:
+        dep = _format_datetime(flight_details["departing_at"])
+        arr = _format_datetime(flight_details["arriving_at"])
+        flight_rows = f"""
+    <tr style="background:#f5f5f5;">
+      <td style="padding:10px 14px;font-weight:bold;">Flight</td>
+      <td style="padding:10px 14px;">{flight_details['flight_number']} ({flight_details['airline']})</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 14px;font-weight:bold;">Trip type</td>
+      <td style="padding:10px 14px;">{flight_details['trip_type']}</td>
+    </tr>
+    <tr style="background:#f5f5f5;">
+      <td style="padding:10px 14px;font-weight:bold;">Departs</td>
+      <td style="padding:10px 14px;">{dep}</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 14px;font-weight:bold;">Arrives</td>
+      <td style="padding:10px 14px;">{arr}</td>
+    </tr>"""
+        link_section = f"""
+  <p style="margin:20px 0 8px;">
+    <a href="{google_url}"
+       style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
+      Search this route on Google Flights →
+    </a>
+  </p>
+  <p style="margin:0 0 20px;font-size:13px;color:#555;">
+    Search for flight <strong>{flight_details['flight_number']}</strong> departing {dep}.
+  </p>"""
+    else:
+        dep = None
+        link_section = f"""
+  <p style="margin:20px 0;">
+    <a href="{google_url}"
+       style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
+      Search this route on Google Flights →
+    </a>
+  </p>"""
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:560px;margin:0 auto;padding:24px;">
+
+  <p>Hi {client_name},</p>
+  <p>Great news — a fare has dropped to your target price for your trip!</p>
+
+  <table style="border-collapse:collapse;width:100%;margin:20px 0;">
+    <tr style="background:#f5f5f5;">
+      <td style="padding:10px 14px;font-weight:bold;">Route</td>
+      <td style="padding:10px 14px;">{origin} → {destination}</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 14px;font-weight:bold;">Travel window</td>
+      <td style="padding:10px 14px;">{date_from} – {date_to}</td>
+    </tr>
+    <tr style="background:#f5f5f5;">
+      <td style="padding:10px 14px;font-weight:bold;">Passengers</td>
+      <td style="padding:10px 14px;">{pax_label}</td>
+    </tr>{flight_rows}
+    <tr>
+      <td style="padding:10px 14px;font-weight:bold;">Current price</td>
+      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}</td>
+    </tr>
+    <tr style="background:#f5f5f5;">
+      <td style="padding:10px 14px;font-weight:bold;">Your target</td>
+      <td style="padding:10px 14px;">{currency} {target_price:.2f}</td>
+    </tr>
+  </table>
+
+  {link_section}
+
+  <p>Fares at this price can disappear quickly — <strong>reply to this email</strong> and I'll get your booking sorted right away.</p>
+
+  <p>Warm regards,<br>
+  <strong>Anna</strong><br>
+  <a href="mailto:{SENDER_EMAIL}">{SENDER_EMAIL}</a></p>
+
+</body>
+</html>
+"""
+
+
+def _build_email_text(watch, price, flight_details):
+    origin = watch["origin"]
+    destination = watch["destination"]
+    date_from = watch["date_from"]
+    date_to = watch["date_to"]
+    passengers = watch["passengers"]
+    target_price = float(watch["target_price"])
+    client_name = watch["client_name"]
+    currency = "USD"
+    exact_date = flight_details["departing_at"] if flight_details else None
+    google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+
+    flight_lines = ""
+    if flight_details:
+        dep = _format_datetime(flight_details["departing_at"])
+        arr = _format_datetime(flight_details["arriving_at"])
+        flight_lines = (
+            f"Flight: {flight_details['flight_number']} ({flight_details['airline']})\n"
+            f"Trip type: {flight_details['trip_type']}\n"
+            f"Departs: {dep}\n"
+            f"Arrives: {arr}\n"
+        )
+        search_tip = f"Search Google Flights: {google_url}\nLook for flight {flight_details['flight_number']} departing {dep}."
+    else:
+        search_tip = f"Search Google Flights: {google_url}"
+
+    return f"""Hi {client_name},
+
+Great news — a fare has dropped to your target price for your trip!
+
+Route: {origin} → {destination}
+Travel window: {date_from} – {date_to}
+Passengers: {passengers}
+{flight_lines}Current price: {currency} {price:.2f}
+Your target: {currency} {target_price:.2f}
+
+{search_tip}
+
+Fares at this price can disappear quickly — reply to this email and I'll get your booking sorted right away.
+
+Warm regards,
+Anna
+{SENDER_EMAIL}
+"""
+
+
+def send_alert(watch, price, flight_details=None):
+    """Send a fare alert email to the client (and a copy to SENDER_EMAIL)."""
+    client_email = watch.get("client_email", "").strip()
+    client_name = watch["client_name"]
+    origin = watch["origin"]
+    destination = watch["destination"]
+    subject = f"Fare alert: {origin} → {destination} — USD {price:.2f}"
+
+    html_body = _build_email_html(watch, price, flight_details)
+    text_body = _build_email_text(watch, price, flight_details)
+
+    to_list = []
+    if client_email and "@" in client_email and client_email != SENDER_EMAIL:
+        to_list.append({"email": client_email, "name": client_name})
+
+    cc_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
+
+    if not to_list:
+        to_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
+        cc_list = []
+
+    payload = {
+        "personalizations": [
+            {
+                "to": to_list,
+                **({"cc": cc_list} if cc_list else {}),
+                "subject": subject,
+            }
+        ],
+        "from": {"email": SENDER_EMAIL, "name": "Anna | FareWatch"},
+        "reply_to": {"email": SENDER_EMAIL, "name": "Anna"},
+        "content": [
+            {"type": "text/plain", "value": text_body},
+            {"type": "text/html", "value": html_body},
+        ],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
+        if response.status_code == 202:
+            print(f"  [alert] Email sent to {[t['email'] for t in to_list]}")
+            return True
+        else:
+            print(f"  [alert] SendGrid error {response.status_code}: {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [alert] Failed to send email: {e}")
+        return False

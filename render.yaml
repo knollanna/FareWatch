@@ -1,0 +1,45 @@
+services:
+  # --- Web app ---
+  - type: web
+    name: farewatch
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    plan: free
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: DUFFEL_API_TOKEN
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDER_EMAIL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.13.0
+
+  # --- Price checker cron job (runs every 6 hours) ---
+  - type: cron
+    name: farewatch-price-check
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 */6 * * *"
+    startCommand: python check_prices.py
+    plan: free
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: DUFFEL_API_TOKEN
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDER_EMAIL
+        sync: false

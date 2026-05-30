@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FareWatch — Login</title>
+</head>
+<body>
+  <h1>✈ FareWatch</h1>
+  <h2>Login</h2>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+        <p><strong>{{ msg }}</strong></p>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST">
+    <label>Password: <input type="password" name="password" autofocus></label>
+    <button type="submit">Log in</button>
+  </form>
+</body>
+</html>

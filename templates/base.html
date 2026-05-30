@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FareWatch</title>
+</head>
+<body>
+  <h1>✈ FareWatch</h1>
+  <nav>
+    <a href="/">Watches</a> |
+    <a href="/add">Add Watch</a> |
+    <a href="/logout">Log out</a>
+  </nav>
+  <hr>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+        <p><strong>{{ msg }}</strong></p>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</body>
+</html>
