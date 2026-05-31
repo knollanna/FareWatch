@@ -1,23 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; vertical-align: middle; }
+  th { background: #f0f0f0; }
+  .btn { padding: 4px 10px; cursor: pointer; margin: 2px; border: 1px solid #999; border-radius: 3px; background: #fff; font-size: 13px; }
+  .btn-pause  { border-color: #e6a817; color: #a07000; }
+  .btn-resume { border-color: #2a7a2a; color: #2a7a2a; }
+  .btn-delete { border-color: #c0392b; color: #c0392b; }
+  .btn-history { border-color: #1a73e8; color: #1a73e8; }
+  .history-panel { display:none; padding: 16px; background: #fafafa; border: 1px solid #ddd; margin-top: 4px; }
+  .stats-row { display: flex; gap: 24px; margin-bottom: 12px; font-size: 14px; }
+  .stat { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 8px 16px; text-align: center; }
+  .stat strong { display: block; font-size: 18px; }
+  .error-badge { color: #c0392b; font-size: 16px; cursor: help; }
+  .paused-section { margin-top: 32px; }
+  .paused-section h2 { color: #888; }
+  .paused-row td { color: #888; background: #fafafa; }
+</style>
+
+<!-- ───── ACTIVE WATCHES ───── -->
 <h2>Active Watches</h2>
 
 {% if watches %}
-  <table border="1" cellpadding="6">
+  <table>
     <thead>
       <tr>
         <th>Route</th>
+        <th>Trip</th>
         <th>Travel Window</th>
-        <th>Passengers</th>
-        <th>Target Price</th>
+        <th>Pax</th>
+        <th>Target</th>
         <th>Latest Price</th>
         <th>Checked</th>
         <th>Alert</th>
         <th>Client</th>
-        <th>Email</th>
-        <th>Created</th>
-        <th>Action</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -25,8 +46,19 @@
       {% set lp = w.latest_price %}
       {% set hit_target = lp and lp.price <= w.target_price %}
       <tr{% if hit_target %} style="background:#d4edda"{% endif %}>
-        <td>{{ w.origin }} → {{ w.destination }}</td>
-        <td>{{ w.date_from }} – {{ w.date_to }}</td>
+        <td>
+          {{ w.origin }} → {{ w.destination }}
+          {% if w.last_error %}
+            <span class="error-badge" title="{{ w.last_error }}">⚠️</span>
+          {% endif %}
+        </td>
+        <td>{{ "Round-trip" if w.trip_type == "round_trip" else "One-way" }}</td>
+        <td>
+          {{ w.date_from }} – {{ w.date_to }}
+          {% if w.trip_type == "round_trip" and w.return_date_from %}
+            <br><small>Return: {{ w.return_date_from }} – {{ w.return_date_to }}</small>
+          {% endif %}
+        </td>
         <td>{{ w.passengers }}</td>
         <td>${{ "%.2f"|format(w.target_price) }}</td>
         <td>
@@ -40,24 +72,27 @@
             <em>Not checked yet</em>
           {% endif %}
         </td>
-        <td>
-          {% if lp %}{{ lp.checked_at[:10] }}{% else %}—{% endif %}
-        </td>
+        <td>{% if lp %}{{ lp.checked_at[:10] }}{% else %}—{% endif %}</td>
         <td style="text-align:center">
-          {% if w.alert_sent_today %}
-            <span title="Alert email sent today">📧 Sent</span>
-          {% else %}
-            —
-          {% endif %}
+          {% if w.alert_sent_today %}<span title="Alert sent today">📧</span>{% else %}—{% endif %}
         </td>
-        <td>{{ w.client_name }}</td>
-        <td>{{ w.client_email }}</td>
-        <td>{{ w.created_at[:10] }}</td>
-        <td>
-          <form method="POST" action="/deactivate/{{ w.id }}"
-                onsubmit="return confirm('Deactivate this watch?')">
-            <button type="submit">Deactivate</button>
+        <td>{{ w.client_name }}<br><small>{{ w.client_email }}</small></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-history" onclick="toggleHistory('{{ w.id }}', this)">📈 History</button>
+          <form method="POST" action="/pause/{{ w.id }}" style="display:inline">
+            <button class="btn btn-pause" type="submit">⏸ Pause</button>
           </form>
+          <form method="POST" action="/delete/{{ w.id }}" style="display:inline"
+                onsubmit="return confirm('Permanently delete this watch and all its history?')">
+            <button class="btn btn-delete" type="submit">🗑 Delete</button>
+          </form>
+        </td>
+      </tr>
+      <tr id="history-row-{{ w.id }}" style="display:none">
+        <td colspan="10">
+          <div class="history-panel" id="history-panel-{{ w.id }}">
+            <em>Loading...</em>
+          </div>
         </td>
       </tr>
       {% endfor %}
@@ -66,5 +101,119 @@
 {% else %}
   <p>No active watches yet. <a href="/add">Add one.</a></p>
 {% endif %}
+
+<!-- ───── PAUSED WATCHES ───── -->
+{% if paused_watches %}
+<div class="paused-section">
+  <h2>⏸ Paused Watches</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Route</th>
+        <th>Trip</th>
+        <th>Travel Window</th>
+        <th>Pax</th>
+        <th>Target</th>
+        <th>Last Price</th>
+        <th>Client</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in paused_watches %}
+      {% set lp = w.latest_price %}
+      <tr class="paused-row">
+        <td>{{ w.origin }} → {{ w.destination }}</td>
+        <td>{{ "Round-trip" if w.trip_type == "round_trip" else "One-way" }}</td>
+        <td>{{ w.date_from }} – {{ w.date_to }}</td>
+        <td>{{ w.passengers }}</td>
+        <td>${{ "%.2f"|format(w.target_price) }}</td>
+        <td>
+          {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.price) }}{% else %}—{% endif %}
+        </td>
+        <td>{{ w.client_name }}</td>
+        <td style="white-space:nowrap">
+          <form method="POST" action="/resume/{{ w.id }}" style="display:inline">
+            <button class="btn btn-resume" type="submit">▶ Resume</button>
+          </form>
+          <form method="POST" action="/delete/{{ w.id }}" style="display:inline"
+                onsubmit="return confirm('Permanently delete this watch and all its history?')">
+            <button class="btn btn-delete" type="submit">🗑 Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+const charts = {};
+
+async function toggleHistory(watchId, btn) {
+  const row = document.getElementById('history-row-' + watchId);
+  const panel = document.getElementById('history-panel-' + watchId);
+
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    btn.textContent = '📈 History';
+    return;
+  }
+
+  row.style.display = '';
+  btn.textContent = '▲ Hide';
+
+  // Already loaded
+  if (charts[watchId]) return;
+
+  const res = await fetch('/history/' + watchId);
+  const data = await res.json();
+
+  if (data.length < 2) {
+    panel.innerHTML = '<em>Not enough data yet — check back after the next price check.</em>';
+    return;
+  }
+
+  const prices = data.map(d => parseFloat(d.price));
+  const labels = data.map(d => d.checked_at.slice(0, 16).replace('T', ' '));
+  const min = Math.min(...prices).toFixed(2);
+  const max = Math.max(...prices).toFixed(2);
+  const current = prices[prices.length - 1].toFixed(2);
+
+  panel.innerHTML = `
+    <div class="stats-row">
+      <div class="stat"><strong>$${current}</strong>Current</div>
+      <div class="stat"><strong style="color:#2a7a2a">$${min}</strong>Lowest seen</div>
+      <div class="stat"><strong style="color:#c0392b">$${max}</strong>Highest seen</div>
+    </div>
+    <canvas id="chart-${watchId}" height="80"></canvas>
+  `;
+
+  const ctx = document.getElementById('chart-' + watchId).getContext('2d');
+  charts[watchId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Price (USD)',
+        data: prices,
+        borderColor: '#1a73e8',
+        backgroundColor: 'rgba(26,115,232,0.08)',
+        pointRadius: 4,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '$' + v } }
+      }
+    }
+  });
+}
+</script>
 
 {% endblock %}

@@ -27,11 +27,20 @@ def already_alerted_today(watch_id):
     return len(result.data) > 0
 
 
+def set_error(watch_id, message):
+    supabase.table("watches").update({"last_error": message}).eq("id", watch_id).execute()
+
+
+def clear_error(watch_id):
+    supabase.table("watches").update({"last_error": None}).eq("id", watch_id).execute()
+
+
 def check_all_watches():
     watches = (
         supabase.table("watches")
         .select("*")
         .eq("is_active", True)
+        .eq("is_paused", False)
         .execute()
         .data
     )
@@ -41,10 +50,12 @@ def check_all_watches():
         return
 
     print(f"Checking {len(watches)} active watch(es)...\n")
+    errors = []
 
     for watch in watches:
         route = f"{watch['origin']} → {watch['destination']}"
-        print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax)...")
+        trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
+        print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
         price, currency, flight_details = get_lowest_fare(
             origin=watch["origin"],
@@ -58,8 +69,14 @@ def check_all_watches():
         )
 
         if price is None:
-            print(f"  No fares found for {route}.\n")
+            msg = f"No fares found for {route} ({watch['date_from']} – {watch['date_to']})"
+            print(f"  ⚠️  ERROR: {msg}\n")
+            set_error(watch["id"], msg)
+            errors.append(f"{route}: {msg}")
             continue
+
+        # Successful check — clear any previous error
+        clear_error(watch["id"])
 
         # Save to price_history
         supabase.table("price_history").insert({
@@ -77,7 +94,7 @@ def check_all_watches():
         # Send alert if target is met and we haven't already sent one today
         if price <= target:
             if already_alerted_today(watch["id"]):
-                print(f"  [alert] Already sent an alert today for this watch — skipping.")
+                print(f"  [alert] Already sent an alert today — skipping.")
             else:
                 success = send_alert(watch, price, flight_details)
                 if success:
@@ -89,6 +106,10 @@ def check_all_watches():
         print()
 
     print("Done.")
+    if errors:
+        print(f"\n⚠️  {len(errors)} watch(es) had errors:")
+        for e in errors:
+            print(f"   • {e}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 import os
+import datetime
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from supabase import Client, create_client
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -29,6 +30,34 @@ def login_required(f):
     return decorated
 
 
+def _attach_watch_extras(watches):
+    """Attach latest_price and alert_sent_today to each watch dict."""
+    today = datetime.date.today().isoformat()
+    for watch in watches:
+        latest = (
+            supabase.table("price_history")
+            .select("price, currency, checked_at")
+            .eq("watch_id", watch["id"])
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        watch["latest_price"] = latest[0] if latest else None
+
+        alert_today = (
+            supabase.table("sent_alerts")
+            .select("id")
+            .eq("watch_id", watch["id"])
+            .gte("sent_at", f"{today}T00:00:00")
+            .limit(1)
+            .execute()
+            .data
+        )
+        watch["alert_sent_today"] = len(alert_today) > 0
+    return watches
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -48,44 +77,30 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    watches = (
+    active_watches = (
         supabase.table("watches")
         .select("*")
         .eq("is_active", True)
+        .eq("is_paused", False)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+    paused_watches = (
+        supabase.table("watches")
+        .select("*")
+        .eq("is_paused", True)
         .order("created_at", desc=True)
         .execute()
         .data
     )
 
-    import datetime
-    today = datetime.date.today().isoformat()
+    _attach_watch_extras(active_watches)
+    _attach_watch_extras(paused_watches)
 
-    for watch in watches:
-        # Most recent price check
-        latest = (
-            supabase.table("price_history")
-            .select("price, currency, checked_at")
-            .eq("watch_id", watch["id"])
-            .order("checked_at", desc=True)
-            .limit(1)
-            .execute()
-            .data
-        )
-        watch["latest_price"] = latest[0] if latest else None
-
-        # Was an alert sent today?
-        alert_today = (
-            supabase.table("sent_alerts")
-            .select("id")
-            .eq("watch_id", watch["id"])
-            .gte("sent_at", f"{today}T00:00:00")
-            .limit(1)
-            .execute()
-            .data
-        )
-        watch["alert_sent_today"] = len(alert_today) > 0
-
-    return render_template("index.html", watches=watches)
+    return render_template("index.html",
+                           watches=active_watches,
+                           paused_watches=paused_watches)
 
 
 @app.route("/add", methods=["GET", "POST"])
@@ -106,6 +121,7 @@ def add_watch():
             "client_name": request.form["client_name"].strip(),
             "client_email": request.form["client_email"].strip(),
             "is_active": True,
+            "is_paused": False,
         }
         supabase.table("watches").insert(watch).execute()
         flash(f"Watch added for {watch['origin']} → {watch['destination']}.")
@@ -113,12 +129,53 @@ def add_watch():
     return render_template("add_watch.html")
 
 
+@app.route("/pause/<watch_id>", methods=["POST"])
+@login_required
+def pause_watch(watch_id):
+    supabase.table("watches").update({"is_active": False, "is_paused": True}).eq("id", watch_id).execute()
+    flash("Watch paused.")
+    return redirect(url_for("index"))
+
+
+@app.route("/resume/<watch_id>", methods=["POST"])
+@login_required
+def resume_watch(watch_id):
+    supabase.table("watches").update({"is_active": True, "is_paused": False}).eq("id", watch_id).execute()
+    flash("Watch resumed.")
+    return redirect(url_for("index"))
+
+
+@app.route("/delete/<watch_id>", methods=["POST"])
+@login_required
+def delete_watch(watch_id):
+    # price_history and sent_alerts cascade-delete automatically
+    supabase.table("watches").delete().eq("id", watch_id).execute()
+    flash("Watch deleted.")
+    return redirect(url_for("index"))
+
+
 @app.route("/deactivate/<watch_id>", methods=["POST"])
 @login_required
 def deactivate_watch(watch_id):
-    supabase.table("watches").update({"is_active": False}).eq("id", watch_id).execute()
-    flash("Watch deactivated.")
+    # Kept for backward compatibility — now just pauses
+    supabase.table("watches").update({"is_active": False, "is_paused": True}).eq("id", watch_id).execute()
+    flash("Watch paused.")
     return redirect(url_for("index"))
+
+
+@app.route("/history/<watch_id>")
+@login_required
+def watch_history(watch_id):
+    """Return price history as JSON for the chart."""
+    rows = (
+        supabase.table("price_history")
+        .select("price, currency, checked_at")
+        .eq("watch_id", watch_id)
+        .order("checked_at", desc=False)
+        .execute()
+        .data
+    )
+    return jsonify(rows)
 
 
 if __name__ == "__main__":
