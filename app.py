@@ -261,5 +261,13 @@ def watch_history(watch_id):
     return jsonify(rows)
 
 
+@app.route("/usage")
+@login_required
+def usage():
+    from usage import get_all_usage
+    data = get_all_usage()
+    return render_template("usage.html", usage=data)
+
+
 if __name__ == "__main__":
     app.run(debug=False)

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page">
+
+  <div class="usage-refresh-bar">
+    <span>Last refreshed: {{ usage.refreshed_at }}</span>
+    <button class="btn-refresh" onclick="location.reload()">↻ refresh</button>
+  </div>
+
+  <div class="usage-grid">
+
+    <!-- ── SendGrid ──────────────────────────────────────────────────────── -->
+    {% set sg = usage.sendgrid %}
+    <div class="usage-card">
+      <div class="usage-card-header">
+        <span class="usage-service-name">SendGrid</span>
+        <div class="usage-status-dot {{ sg.status_today if sg.available else 'gray' }}"></div>
+      </div>
+
+      {% if sg.available %}
+        <div class="usage-metrics">
+
+          <div>
+            <div class="usage-metric">
+              <span class="usage-metric-label">emails sent today</span>
+              <span class="usage-metric-value {{ sg.status_today }}">
+                {{ sg.sent_today }} / {{ sg.daily_limit }}
+              </span>
+            </div>
+            <div class="usage-bar-wrap">
+              <div class="usage-bar-fill {{ sg.status_today }}"
+                   style="width: {{ [[((sg.sent_today / sg.daily_limit) * 100)|round(1), 100]|min, 0]|max }}%"></div>
+            </div>
+          </div>
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">emails sent this month</span>
+            <span class="usage-metric-value">{{ sg.sent_month }}</span>
+          </div>
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">remaining today</span>
+            <span class="usage-metric-value {{ sg.status_today }}">
+              {{ sg.daily_limit - sg.sent_today }}
+            </span>
+          </div>
+
+        </div>
+      {% else %}
+        <p class="usage-unavailable">Stats unavailable — check dashboard</p>
+      {% endif %}
+
+      <div class="usage-footer">
+        <span style="font-size:12px;color:var(--muted)">Free tier: 100 emails/day</span>
+        <a href="{{ sg.dashboard_url }}" target="_blank" class="usage-dashboard-link">Open dashboard →</a>
+      </div>
+    </div>
+
+    <!-- ── Duffel ────────────────────────────────────────────────────────── -->
+    {% set df = usage.duffel %}
+    <div class="usage-card">
+      <div class="usage-card-header">
+        <span class="usage-service-name">Duffel</span>
+        <div class="usage-status-dot {{ 'green' if df.connected else 'red' }}"></div>
+      </div>
+
+      {% if df.available %}
+        <div class="usage-metrics">
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">API connection</span>
+            <span class="usage-metric-value green">connected ✓</span>
+          </div>
+
+          {% if df.balance is not none %}
+            <div class="usage-metric">
+              <span class="usage-metric-label">balance</span>
+              <span class="usage-metric-value">{{ df.currency }} {{ df.balance }}</span>
+            </div>
+          {% else %}
+            <div class="usage-metric">
+              <span class="usage-metric-label">balance</span>
+              <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+            </div>
+          {% endif %}
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">token type</span>
+            <span class="usage-metric-value">live</span>
+          </div>
+
+        </div>
+      {% else %}
+        <p class="usage-unavailable">Unable to connect — check your API token</p>
+      {% endif %}
+
+      <div class="usage-footer">
+        <span style="font-size:12px;color:var(--muted)">Read and write scope</span>
+        <a href="{{ df.dashboard_url }}" target="_blank" class="usage-dashboard-link">Open dashboard →</a>
+      </div>
+    </div>
+
+    <!-- ── Supabase ──────────────────────────────────────────────────────── -->
+    {% set sb = usage.supabase %}
+    <div class="usage-card">
+      <div class="usage-card-header">
+        <span class="usage-service-name">Supabase</span>
+        <div class="usage-status-dot {{ 'green' if sb.available else 'gray' }}"></div>
+      </div>
+
+      {% if sb.available %}
+        <div class="usage-metrics">
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">watches</span>
+            <span class="usage-metric-value">{{ sb.watches_count }} rows</span>
+          </div>
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">price history</span>
+            <span class="usage-metric-value">{{ sb.history_count }} rows</span>
+          </div>
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">sent alerts</span>
+            <span class="usage-metric-value">{{ sb.alerts_count }} rows</span>
+          </div>
+
+          <div class="usage-metric">
+            <span class="usage-metric-label">database size</span>
+            <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+          </div>
+
+        </div>
+      {% else %}
+        <p class="usage-unavailable">Unable to reach database</p>
+      {% endif %}
+
+      <div class="usage-footer">
+        <span style="font-size:12px;color:var(--muted)">Free tier: 500MB storage</span>
+        <a href="{{ sb.dashboard_url }}" target="_blank" class="usage-dashboard-link">Open dashboard →</a>
+      </div>
+    </div>
+
+    <!-- ── Render ────────────────────────────────────────────────────────── -->
+    {% set rd = usage.render %}
+    <div class="usage-card">
+      <div class="usage-card-header">
+        <span class="usage-service-name">Render</span>
+        <div class="usage-status-dot green"></div>
+      </div>
+
+      <div class="usage-metrics">
+        <div class="usage-metric">
+          <span class="usage-metric-label">web service</span>
+          <span class="usage-metric-value">farewatch</span>
+        </div>
+        <div class="usage-metric">
+          <span class="usage-metric-label">free hours/month</span>
+          <span class="usage-metric-value">{{ rd.web_hours_limit }} hrs</span>
+        </div>
+        <div class="usage-metric">
+          <span class="usage-metric-label">cron job</span>
+          <span class="usage-metric-value">every 6 hours</span>
+        </div>
+        <div class="usage-metric">
+          <span class="usage-metric-label">live usage</span>
+          <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+        </div>
+      </div>
+
+      <div class="usage-footer">
+        <span style="font-size:12px;color:var(--muted)">Free tier: 750 hrs/month</span>
+        <a href="{{ rd.dashboard_url }}" target="_blank" class="usage-dashboard-link">Open dashboard →</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
