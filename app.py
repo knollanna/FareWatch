@@ -58,6 +58,54 @@ def _attach_watch_extras(watches):
     return watches
 
 
+def _get_metrics(active_watches, all_watches):
+    """Compute the four dashboard metrics."""
+    # Active watch count
+    active_count = len(active_watches)
+
+    # Total alerts sent
+    try:
+        alerts_result = supabase.table("sent_alerts").select("id", count="exact").execute()
+        alerts_count = alerts_result.count or 0
+    except Exception:
+        alerts_count = 0
+
+    # Average price drop (target - current) for watches where target is met
+    drops = []
+    for w in active_watches:
+        lp = w.get("latest_price")
+        if lp and float(lp["price"]) <= float(w["target_price"]):
+            drops.append(float(w["target_price"]) - float(lp["price"]))
+    avg_drop = round(sum(drops) / len(drops), 0) if drops else None
+
+    # Unique clients across all watches
+    emails = set(w["client_email"] for w in all_watches if w.get("client_email"))
+    clients_count = len(emails)
+
+    return {
+        "active_count": active_count,
+        "alerts_count": alerts_count,
+        "avg_drop": avg_drop,
+        "clients_count": clients_count,
+    }
+
+
+def _get_recent_alerts():
+    """Fetch last 8 sent alerts with watch details."""
+    try:
+        rows = (
+            supabase.table("sent_alerts")
+            .select("*, watches(origin, destination, client_name, client_email)")
+            .order("sent_at", desc=True)
+            .limit(8)
+            .execute()
+            .data
+        )
+        return rows
+    except Exception:
+        return []
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -94,13 +142,19 @@ def index():
         .execute()
         .data
     )
+    all_watches = active_watches + paused_watches
 
     _attach_watch_extras(active_watches)
     _attach_watch_extras(paused_watches)
 
+    metrics = _get_metrics(active_watches, all_watches)
+    recent_alerts = _get_recent_alerts()
+
     return render_template("index.html",
                            watches=active_watches,
-                           paused_watches=paused_watches)
+                           paused_watches=paused_watches,
+                           metrics=metrics,
+                           recent_alerts=recent_alerts)
 
 
 @app.route("/add", methods=["GET", "POST"])
@@ -148,7 +202,6 @@ def resume_watch(watch_id):
 @app.route("/delete/<watch_id>", methods=["POST"])
 @login_required
 def delete_watch(watch_id):
-    # price_history and sent_alerts cascade-delete automatically
     supabase.table("watches").delete().eq("id", watch_id).execute()
     flash("Watch deleted.")
     return redirect(url_for("index"))
@@ -157,7 +210,6 @@ def delete_watch(watch_id):
 @app.route("/deactivate/<watch_id>", methods=["POST"])
 @login_required
 def deactivate_watch(watch_id):
-    # Kept for backward compatibility — now just pauses
     supabase.table("watches").update({"is_active": False, "is_paused": True}).eq("id", watch_id).execute()
     flash("Watch paused.")
     return redirect(url_for("index"))
@@ -166,7 +218,6 @@ def deactivate_watch(watch_id):
 @app.route("/history/<watch_id>")
 @login_required
 def watch_history(watch_id):
-    """Return price history as JSON for the chart."""
     rows = (
         supabase.table("price_history")
         .select("price, currency, checked_at")

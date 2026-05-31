@@ -1,222 +1,285 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="page">
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+  <!-- ── Metrics row ─────────────────────────────────────────────────────── -->
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="metric-label">active watches</div>
+      <div class="metric-value">{{ metrics.active_count }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">alerts sent</div>
+      <div class="metric-value">{{ metrics.alerts_count }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">avg drop</div>
+      <div class="metric-value">{% if metrics.avg_drop %}${{ metrics.avg_drop|int }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">clients</div>
+      <div class="metric-value">{{ metrics.clients_count }}</div>
+    </div>
+  </div>
 
-<style>
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border: 1px solid #ccc; padding: 8px 10px; vertical-align: middle; }
-  th { background: #f0f0f0; }
-  .btn { padding: 4px 10px; cursor: pointer; margin: 2px; border: 1px solid #999; border-radius: 3px; background: #fff; font-size: 13px; }
-  .btn-pause  { border-color: #e6a817; color: #a07000; }
-  .btn-resume { border-color: #2a7a2a; color: #2a7a2a; }
-  .btn-delete { border-color: #c0392b; color: #c0392b; }
-  .btn-history { border-color: #1a73e8; color: #1a73e8; }
-  .history-panel { display:none; padding: 16px; background: #fafafa; border: 1px solid #ddd; margin-top: 4px; }
-  .stats-row { display: flex; gap: 24px; margin-bottom: 12px; font-size: 14px; }
-  .stat { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 8px 16px; text-align: center; }
-  .stat strong { display: block; font-size: 18px; }
-  .error-badge { color: #c0392b; font-size: 16px; cursor: help; }
-  .paused-section { margin-top: 32px; }
-  .paused-section h2 { color: #888; }
-  .paused-row td { color: #888; background: #fafafa; }
-</style>
+  <!-- ── Active watch cards ─────────────────────────────────────────────── -->
+  {% if watches %}
+  <div class="cards-grid">
+    {% for w in watches %}
+    {% set lp = w.latest_price %}
+    {% set hit_target = lp and lp.price <= w.target_price %}
+    {% if lp %}
+      {% set progress = [[((w.target_price / lp.price) * 100)|round(1), 100]|min, 0]|max %}
+    {% else %}
+      {% set progress = 0 %}
+    {% endif %}
 
-<!-- ───── ACTIVE WATCHES ───── -->
-<h2>Active Watches</h2>
+    <div class="watch-card {{ 'target-met' if hit_target }}">
 
-{% if watches %}
-  <table>
-    <thead>
-      <tr>
-        <th>Route</th>
-        <th>Trip</th>
-        <th>Travel Window</th>
-        <th>Pax</th>
-        <th>Target</th>
-        <th>Latest Price</th>
-        <th>Checked</th>
-        <th>Alert</th>
-        <th>Client</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for w in watches %}
-      {% set lp = w.latest_price %}
-      {% set hit_target = lp and lp.price <= w.target_price %}
-      <tr{% if hit_target %} style="background:#d4edda"{% endif %}>
-        <td>
-          {{ w.origin }} → {{ w.destination }}
-          {% if w.last_error %}
-            <span class="error-badge" title="{{ w.last_error }}">⚠️</span>
+      <!-- badges -->
+      <div class="card-badges">
+        <div>
+          {% if hit_target %}
+            <span class="badge badge-drop">price drop ✓</span>
+          {% elif w.last_error %}
+            <span class="badge badge-error" title="{{ w.last_error }}">⚠ error</span>
+          {% elif w.alert_sent_today %}
+            <span class="badge badge-alert">alert sent today</span>
           {% endif %}
-        </td>
-        <td>{{ "Round-trip" if w.trip_type == "round_trip" else "One-way" }}</td>
-        <td>
-          {{ w.date_from }} – {{ w.date_to }}
-          {% if w.trip_type == "round_trip" and w.return_date_from %}
-            <br><small>Return: {{ w.return_date_from }} – {{ w.return_date_to }}</small>
-          {% endif %}
-        </td>
-        <td>{{ w.passengers }}</td>
-        <td>${{ "%.2f"|format(w.target_price) }}</td>
-        <td>
+        </div>
+        <span class="badge badge-client">{{ w.client_name }}</span>
+      </div>
+
+      <!-- route -->
+      <div class="card-route">
+        {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
+      </div>
+
+      <!-- metadata -->
+      <div class="card-meta">
+        <span>{{ w.date_from }} – {{ w.date_to }}</span>
+        <span>{{ w.passengers }} pax</span>
+        <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
+        {% if lp %}
+          <span>checked {{ lp.checked_at[:10] }}</span>
+        {% else %}
+          <span>not checked yet</span>
+        {% endif %}
+      </div>
+
+      <!-- prices -->
+      <div class="card-prices">
+        <div class="price-current {{ 'on-target' if hit_target }}">
           {% if lp %}
-            {% if hit_target %}
-              <strong>{{ lp.currency }} {{ "%.2f"|format(lp.price) }} ✓</strong>
-            {% else %}
-              {{ lp.currency }} {{ "%.2f"|format(lp.price) }}
-            {% endif %}
+            {{ lp.currency }} {{ "%.2f"|format(lp.price) }}
           {% else %}
-            <em>Not checked yet</em>
+            —
           {% endif %}
-        </td>
-        <td>{% if lp %}{{ lp.checked_at[:10] }}{% else %}—{% endif %}</td>
-        <td style="text-align:center">
-          {% if w.alert_sent_today %}<span title="Alert sent today">📧</span>{% else %}—{% endif %}
-        </td>
-        <td>{{ w.client_name }}<br><small>{{ w.client_email }}</small></td>
-        <td style="white-space:nowrap">
-          <button class="btn btn-history" onclick="toggleHistory('{{ w.id }}', this)">📈 History</button>
-          <form method="POST" action="/pause/{{ w.id }}" style="display:inline">
-            <button class="btn btn-pause" type="submit">⏸ Pause</button>
-          </form>
-          <form method="POST" action="/delete/{{ w.id }}" style="display:inline"
-                onsubmit="return confirm('Permanently delete this watch and all its history?')">
-            <button class="btn btn-delete" type="submit">🗑 Delete</button>
-          </form>
-        </td>
-      </tr>
-      <tr id="history-row-{{ w.id }}" style="display:none">
-        <td colspan="10">
-          <div class="history-panel" id="history-panel-{{ w.id }}">
-            <em>Loading...</em>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-{% else %}
-  <p>No active watches yet. <a href="/add">Add one.</a></p>
-{% endif %}
+        </div>
+        <div class="price-target-label">
+          target
+          <strong>${{ "%.2f"|format(w.target_price) }}</strong>
+        </div>
+      </div>
 
-<!-- ───── PAUSED WATCHES ───── -->
-{% if paused_watches %}
-<div class="paused-section">
-  <h2>⏸ Paused Watches</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Route</th>
-        <th>Trip</th>
-        <th>Travel Window</th>
-        <th>Pax</th>
-        <th>Target</th>
-        <th>Last Price</th>
-        <th>Client</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for w in paused_watches %}
-      {% set lp = w.latest_price %}
-      <tr class="paused-row">
-        <td>{{ w.origin }} → {{ w.destination }}</td>
-        <td>{{ "Round-trip" if w.trip_type == "round_trip" else "One-way" }}</td>
-        <td>{{ w.date_from }} – {{ w.date_to }}</td>
-        <td>{{ w.passengers }}</td>
-        <td>${{ "%.2f"|format(w.target_price) }}</td>
-        <td>
-          {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.price) }}{% else %}—{% endif %}
-        </td>
-        <td>{{ w.client_name }}</td>
-        <td style="white-space:nowrap">
-          <form method="POST" action="/resume/{{ w.id }}" style="display:inline">
-            <button class="btn btn-resume" type="submit">▶ Resume</button>
-          </form>
-          <form method="POST" action="/delete/{{ w.id }}" style="display:inline"
-                onsubmit="return confirm('Permanently delete this watch and all its history?')">
-            <button class="btn btn-delete" type="submit">🗑 Delete</button>
-          </form>
-        </td>
-      </tr>
+      <!-- progress bar -->
+      <div class="progress-wrap">
+        <div class="progress-fill {{ 'on-target' if hit_target }}"
+             style="width: {{ progress }}%"></div>
+      </div>
+
+      <!-- actions -->
+      <div class="card-actions">
+        <form method="POST" action="/pause/{{ w.id }}">
+          <button class="btn-sm" type="submit">⏸ pause</button>
+        </form>
+        <form method="POST" action="/delete/{{ w.id }}"
+              onsubmit="return confirm('Permanently delete this watch and all its history?')">
+          <button class="btn-sm danger" type="submit">delete</button>
+        </form>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p style="color:var(--muted);font-size:14px;margin-bottom:24px;">No active watches yet.</p>
+  {% endif %}
+
+  <!-- ── Add fare watch ─────────────────────────────────────────────────── -->
+  <button class="add-watch-btn" onclick="toggleAddForm(this)">+ add fare watch</button>
+
+  <div class="add-form-wrap" id="add-form-wrap">
+    <h3>New fare watch</h3>
+    <form method="POST" action="/add">
+
+      <!-- trip type toggle -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:500;color:var(--muted);margin-bottom:8px;">trip type</div>
+        <div class="trip-toggle">
+          <input type="radio" name="trip_type" id="tt_oneway" value="one_way" checked
+                 onchange="toggleReturnDates()">
+          <label for="tt_oneway">one-way</label>
+          <input type="radio" name="trip_type" id="tt_round" value="round_trip"
+                 onchange="toggleReturnDates()">
+          <label for="tt_round">round-trip</label>
+        </div>
+      </div>
+
+      <!-- from / to -->
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="f_origin">from</label>
+          <input type="text" id="f_origin" name="origin" maxlength="3" placeholder="JFK" required>
+        </div>
+        <div class="form-field">
+          <label for="f_dest">to</label>
+          <input type="text" id="f_dest" name="destination" maxlength="3" placeholder="CDG" required>
+        </div>
+      </div>
+
+      <!-- depart dates -->
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="f_date_from">earliest departure</label>
+          <input type="date" id="f_date_from" name="date_from" required>
+        </div>
+        <div class="form-field">
+          <label for="f_date_to">latest departure</label>
+          <input type="date" id="f_date_to" name="date_to" required>
+        </div>
+      </div>
+
+      <!-- return dates (round-trip only) -->
+      <div class="form-grid return-dates" id="return-dates">
+        <div class="form-field">
+          <label for="f_ret_from">earliest return</label>
+          <input type="date" id="f_ret_from" name="return_date_from">
+        </div>
+        <div class="form-field">
+          <label for="f_ret_to">latest return</label>
+          <input type="date" id="f_ret_to" name="return_date_to">
+        </div>
+      </div>
+
+      <!-- target / client -->
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="f_target">target price (USD)</label>
+          <input type="number" id="f_target" name="target_price" min="1" step="0.01" placeholder="500.00" required>
+        </div>
+        <div class="form-field">
+          <label for="f_pax">passengers</label>
+          <input type="number" id="f_pax" name="passengers" min="1" max="9" value="1" required>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="f_name">client name</label>
+          <input type="text" id="f_name" name="client_name" required style="text-transform:none">
+        </div>
+        <div class="form-field">
+          <label for="f_email">client email</label>
+          <input type="email" id="f_email" name="client_email" required style="text-transform:none">
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn-cancel" onclick="toggleAddForm()">cancel</button>
+        <button type="submit" class="btn-save">save watch</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Paused watches ─────────────────────────────────────────────────── -->
+  {% if paused_watches %}
+  <div class="paused-section">
+    <button class="paused-toggle" onclick="togglePaused(this)">
+      <span>▶</span> paused watches ({{ paused_watches|length }})
+    </button>
+    <div id="paused-list" style="display:none">
+      <div class="cards-grid">
+        {% for w in paused_watches %}
+        {% set lp = w.latest_price %}
+        <div class="watch-card" style="opacity:0.65">
+          <div class="card-badges">
+            <span class="badge badge-paused">paused</span>
+            <span class="badge badge-client">{{ w.client_name }}</span>
+          </div>
+          <div class="card-route">
+            {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
+          </div>
+          <div class="card-meta">
+            <span>{{ w.date_from }} – {{ w.date_to }}</span>
+            <span>{{ w.passengers }} pax</span>
+            {% if lp %}<span>last ${{ "%.2f"|format(lp.price) }}</span>{% endif %}
+          </div>
+          <div class="card-actions">
+            <form method="POST" action="/resume/{{ w.id }}">
+              <button class="btn-sm accent" type="submit">▶ resume</button>
+            </form>
+            <form method="POST" action="/delete/{{ w.id }}"
+                  onsubmit="return confirm('Permanently delete this watch?')">
+              <button class="btn-sm danger" type="submit">delete</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Recent alerts ──────────────────────────────────────────────────── -->
+  <div class="alerts-section">
+    <div class="section-heading">recent alerts</div>
+    {% if recent_alerts %}
+    <div class="alert-list">
+      {% for a in recent_alerts %}
+      {% set w = a.watches %}
+      <div class="alert-item">
+        <div class="alert-dot green"></div>
+        <div class="alert-text">
+          <span class="route">{{ w.origin if w else '?' }} → {{ w.destination if w else '?' }}</span>
+          — fare dropped to <strong>${{ "%.2f"|format(a.price) }}</strong>
+        </div>
+        {% if w %}<span class="alert-client">{{ w.client_name }}</span>{% endif %}
+        <span class="alert-time">{{ a.sent_at[:10] }}</span>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+    {% else %}
+      <p class="no-alerts">No alerts sent yet.</p>
+    {% endif %}
+  </div>
+
 </div>
-{% endif %}
 
 <script>
-const charts = {};
-
-async function toggleHistory(watchId, btn) {
-  const row = document.getElementById('history-row-' + watchId);
-  const panel = document.getElementById('history-panel-' + watchId);
-
-  if (row.style.display !== 'none') {
-    row.style.display = 'none';
-    btn.textContent = '📈 History';
-    return;
-  }
-
-  row.style.display = '';
-  btn.textContent = '▲ Hide';
-
-  // Already loaded
-  if (charts[watchId]) return;
-
-  const res = await fetch('/history/' + watchId);
-  const data = await res.json();
-
-  if (data.length < 2) {
-    panel.innerHTML = '<em>Not enough data yet — check back after the next price check.</em>';
-    return;
-  }
-
-  const prices = data.map(d => parseFloat(d.price));
-  const labels = data.map(d => d.checked_at.slice(0, 16).replace('T', ' '));
-  const min = Math.min(...prices).toFixed(2);
-  const max = Math.max(...prices).toFixed(2);
-  const current = prices[prices.length - 1].toFixed(2);
-
-  panel.innerHTML = `
-    <div class="stats-row">
-      <div class="stat"><strong>$${current}</strong>Current</div>
-      <div class="stat"><strong style="color:#2a7a2a">$${min}</strong>Lowest seen</div>
-      <div class="stat"><strong style="color:#c0392b">$${max}</strong>Highest seen</div>
-    </div>
-    <div style="position:relative;height:200px;width:100%;">
-      <canvas id="chart-${watchId}"></canvas>
-    </div>
-  `;
-
-  const ctx = document.getElementById('chart-' + watchId).getContext('2d');
-  charts[watchId] = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Price (USD)',
-        data: prices,
-        borderColor: '#1a73e8',
-        backgroundColor: 'rgba(26,115,232,0.08)',
-        pointRadius: 4,
-        tension: 0.3,
-        fill: true,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { ticks: { callback: v => '$' + v } }
-      }
-    }
-  });
+function toggleAddForm(btn) {
+  const wrap = document.getElementById('add-form-wrap');
+  const isOpen = wrap.classList.toggle('open');
+  if (btn) btn.style.display = isOpen ? 'none' : '';
 }
+
+function toggleReturnDates() {
+  const isRound = document.getElementById('tt_round').checked;
+  const rd = document.getElementById('return-dates');
+  rd.classList.toggle('show', isRound);
+  document.getElementById('f_ret_from').required = isRound;
+  document.getElementById('f_ret_to').required = isRound;
+}
+
+function togglePaused(btn) {
+  const list = document.getElementById('paused-list');
+  const open = list.style.display === 'none';
+  list.style.display = open ? '' : 'none';
+  btn.querySelector('span').textContent = open ? '▼' : '▶';
+}
+
+// If form was open before a flash (e.g. after redirect), keep it closed.
+// Auto-open if there's a validation error (future enhancement).
 </script>
 
 {% endblock %}

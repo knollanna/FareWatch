@@ -2,25 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FareWatch</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <h1>✈ FareWatch</h1>
-  <nav>
-    <a href="/">Watches</a> |
-    <a href="/add">Add Watch</a> |
-    <a href="/logout">Log out</a>
-  </nav>
-  <hr>
+
+  <header class="header">
+    <a href="/" class="logo">fare<span>watch</span></a>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if request.path == '/' }}">watches</a>
+      <a href="#" class="">clients</a>
+      <a href="#" class="">settings</a>
+      <a href="/logout" class="nav-logout">log out</a>
+    </nav>
+  </header>
 
   {% with messages = get_flashed_messages() %}
     {% if messages %}
       {% for msg in messages %}
-        <p><strong>{{ msg }}</strong></p>
+        <div class="flash-bar">{{ msg }}</div>
       {% endfor %}
     {% endif %}
   {% endwith %}
 
   {% block content %}{% endblock %}
+
 </body>
 </html>

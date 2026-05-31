@@ -2,23 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>FareWatch — Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FareWatch</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <h1>✈ FareWatch</h1>
-  <h2>Login</h2>
+  <div class="login-page">
+    <div class="login-box">
+      <div class="login-logo">fare<span>watch</span></div>
 
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      {% for msg in messages %}
-        <p><strong>{{ msg }}</strong></p>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          {% for msg in messages %}
+            <div class="login-error">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
 
-  <form method="POST">
-    <label>Password: <input type="password" name="password" autofocus></label>
-    <button type="submit">Log in</button>
-  </form>
+      <form method="POST">
+        <div class="form-field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autofocus placeholder="Enter password">
+        </div>
+        <button type="submit" class="btn-login">Log in</button>
+      </form>
+    </div>
+  </div>
 </body>
 </html>
