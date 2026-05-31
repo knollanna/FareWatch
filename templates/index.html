@@ -187,7 +187,9 @@ async function toggleHistory(watchId, btn) {
       <div class="stat"><strong style="color:#2a7a2a">$${min}</strong>Lowest seen</div>
       <div class="stat"><strong style="color:#c0392b">$${max}</strong>Highest seen</div>
     </div>
-    <canvas id="chart-${watchId}" height="80"></canvas>
+    <div style="position:relative;height:200px;width:100%;">
+      <canvas id="chart-${watchId}"></canvas>
+    </div>
   `;
 
   const ctx = document.getElementById('chart-' + watchId).getContext('2d');
@@ -207,6 +209,7 @@ async function toggleHistory(watchId, btn) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
         y: { ticks: { callback: v => '$' + v } }
