@@ -16,6 +16,32 @@ def _google_flights_url(origin, destination, date_from, passengers, exact_date=N
     return f"https://www.google.com/travel/flights?q={urllib.parse.quote(q)}&curr=USD"
 
 
+AIRLINE_WEBSITES = {
+    "AA": ("American Airlines", "https://www.aa.com"),
+    "BA": ("British Airways", "https://www.britishairways.com"),
+    "DL": ("Delta", "https://www.delta.com"),
+    "UA": ("United Airlines", "https://www.united.com"),
+    "LH": ("Lufthansa", "https://www.lufthansa.com"),
+    "AF": ("Air France", "https://www.airfrance.com"),
+    "KL": ("KLM", "https://www.klm.com"),
+    "IB": ("Iberia", "https://www.iberia.com"),
+    "VS": ("Virgin Atlantic", "https://www.virginatlantic.com"),
+    "EK": ("Emirates", "https://www.emirates.com"),
+    "QR": ("Qatar Airways", "https://www.qatarairways.com"),
+    "TK": ("Turkish Airlines", "https://www.turkishairlines.com"),
+    "B6": ("JetBlue", "https://www.jetblue.com"),
+    "WN": ("Southwest", "https://www.southwest.com"),
+    "AS": ("Alaska Airlines", "https://www.alaskaair.com"),
+    "AC": ("Air Canada", "https://www.aircanada.com"),
+    "LX": ("Swiss", "https://www.swiss.com"),
+    "OS": ("Austrian", "https://www.austrian.com"),
+    "SN": ("Brussels Airlines", "https://www.brusselsairlines.com"),
+    "AZ": ("ITA Airways", "https://www.itaspa.com"),
+    "SK": ("SAS", "https://www.flysas.com"),
+    "AY": ("Finnair", "https://www.finnair.com"),
+}
+
+
 
 
 def _format_datetime(dt_str):
@@ -66,6 +92,12 @@ def _build_email_html(watch, price, flight_details):
       <td style="padding:10px 14px;font-weight:bold;">Arrives</td>
       <td style="padding:10px 14px;">{arr}</td>
     </tr>"""
+        iata = flight_details["flight_number"].split()[0].upper()
+        airline_info = AIRLINE_WEBSITES.get(iata)
+        airline_link = (
+            f' or go directly to <a href="{airline_info[1]}">{airline_info[0]}</a>'
+            if airline_info else ""
+        )
         link_section = f"""
   <p style="margin:20px 0 8px;">
     <a href="{google_url}"
@@ -74,7 +106,7 @@ def _build_email_html(watch, price, flight_details):
     </a>
   </p>
   <p style="margin:0 0 20px;font-size:13px;color:#555;">
-    Search for flight <strong>{flight_details['flight_number']}</strong> departing {dep}.
+    Search for flight <strong>{flight_details['flight_number']}</strong> departing {dep}{airline_link}.
   </p>"""
     else:
         dep = None
@@ -152,7 +184,10 @@ def _build_email_text(watch, price, flight_details):
             f"Departs: {dep}\n"
             f"Arrives: {arr}\n"
         )
-        search_tip = f"Search Google Flights: {google_url}\nLook for flight {flight_details['flight_number']} departing {dep}."
+        iata = flight_details["flight_number"].split()[0].upper()
+        airline_info = AIRLINE_WEBSITES.get(iata)
+        airline_line = f"\n{airline_info[0]} website: {airline_info[1]}" if airline_info else ""
+        search_tip = f"Search Google Flights: {google_url}\nLook for flight {flight_details['flight_number']} departing {dep}.{airline_line}"
     else:
         search_tip = f"Search Google Flights: {google_url}"
 

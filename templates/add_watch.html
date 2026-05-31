@@ -16,12 +16,28 @@
                  placeholder="CDG" required style="text-transform:uppercase"></td>
     </tr>
     <tr>
+      <td><label>Trip type</label></td>
+      <td>
+        <label><input type="radio" name="trip_type" value="one_way" checked onchange="toggleReturn()"> One-way</label>
+        &nbsp;&nbsp;
+        <label><input type="radio" name="trip_type" value="round_trip" onchange="toggleReturn()"> Round-trip</label>
+      </td>
+    </tr>
+    <tr>
       <td><label for="date_from">Earliest departure date</label></td>
       <td><input type="date" id="date_from" name="date_from" required></td>
     </tr>
     <tr>
       <td><label for="date_to">Latest departure date</label></td>
       <td><input type="date" id="date_to" name="date_to" required></td>
+    </tr>
+    <tr id="return_dates_row" style="display:none">
+      <td><label for="return_date_from">Earliest return date</label></td>
+      <td><input type="date" id="return_date_from" name="return_date_from"></td>
+    </tr>
+    <tr id="return_dates_row2" style="display:none">
+      <td><label for="return_date_to">Latest return date</label></td>
+      <td><input type="date" id="return_date_to" name="return_date_to"></td>
     </tr>
     <tr>
       <td><label for="passengers">Number of passengers</label></td>
@@ -43,9 +59,21 @@
     </tr>
   </table>
 
+  </table>
+
   <br>
   <button type="submit">Add Watch</button>
   <a href="/">Cancel</a>
 </form>
+
+<script>
+function toggleReturn() {
+  const isRoundTrip = document.querySelector('input[name="trip_type"]:checked').value === 'round_trip';
+  document.getElementById('return_dates_row').style.display = isRoundTrip ? '' : 'none';
+  document.getElementById('return_dates_row2').style.display = isRoundTrip ? '' : 'none';
+  document.getElementById('return_date_from').required = isRoundTrip;
+  document.getElementById('return_date_to').required = isRoundTrip;
+}
+</script>
 
 {% endblock %}

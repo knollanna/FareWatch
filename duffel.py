@@ -40,11 +40,12 @@ def _extract_flight_details(offer):
         return None
 
 
-def get_lowest_fare(origin, destination, date_from, date_to, passengers):
+def get_lowest_fare(origin, destination, date_from, date_to, passengers,
+                    trip_type="one_way", return_date_from=None, return_date_to=None):
     """
     Search for flights across a date range.
+    For round-trip, also loops over return dates to find the best combination.
     Returns (price, currency, flight_details) or (None, None, None) if nothing found.
-    flight_details is a dict with airline, flight_number, departing_at, arriving_at, trip_type.
     """
     try:
         start = datetime.date.fromisoformat(date_from)
@@ -53,15 +54,37 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers):
         print(f"  [duffel] Invalid dates: {date_from} / {date_to}")
         return None, None, None
 
+    # Build list of return dates for round-trip
+    return_dates = []
+    if trip_type == "round_trip" and return_date_from and return_date_to:
+        try:
+            r_start = datetime.date.fromisoformat(return_date_from)
+            r_end = datetime.date.fromisoformat(return_date_to)
+            r = r_start
+            while r <= r_end:
+                return_dates.append(str(r))
+                r += datetime.timedelta(days=1)
+        except ValueError:
+            print(f"  [duffel] Invalid return dates: {return_date_from} / {return_date_to}")
+
     lowest_price = None
     lowest_currency = None
     lowest_details = None
 
     current = start
     while current <= end:
-        price, currency, details = _search_single_date(origin, destination, str(current), passengers)
-        if price is not None:
-            if lowest_price is None or price < lowest_price:
+        if trip_type == "round_trip" and return_dates:
+            for return_date in return_dates:
+                price, currency, details = _search_single_date(
+                    origin, destination, str(current), passengers, return_date=return_date
+                )
+                if price is not None and (lowest_price is None or price < lowest_price):
+                    lowest_price = price
+                    lowest_currency = currency
+                    lowest_details = details
+        else:
+            price, currency, details = _search_single_date(origin, destination, str(current), passengers)
+            if price is not None and (lowest_price is None or price < lowest_price):
                 lowest_price = price
                 lowest_currency = currency
                 lowest_details = details
@@ -70,17 +93,15 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers):
     return lowest_price, lowest_currency, lowest_details
 
 
-def _search_single_date(origin, destination, departure_date, passengers):
+def _search_single_date(origin, destination, departure_date, passengers, return_date=None):
     """Search one specific date. Returns (price, currency, flight_details) or (None, None, None)."""
+    slices = [{"origin": origin, "destination": destination, "departure_date": departure_date}]
+    if return_date:
+        slices.append({"origin": destination, "destination": origin, "departure_date": return_date})
+
     payload = {
         "data": {
-            "slices": [
-                {
-                    "origin": origin,
-                    "destination": destination,
-                    "departure_date": departure_date,
-                }
-            ],
+            "slices": slices,
             "passengers": [{"type": "adult"} for _ in range(passengers)],
             "cabin_class": "economy",
         }

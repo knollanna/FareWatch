@@ -52,6 +52,9 @@ def check_all_watches():
             date_from=watch["date_from"],
             date_to=watch["date_to"],
             passengers=watch["passengers"],
+            trip_type=watch.get("trip_type", "one_way"),
+            return_date_from=watch.get("return_date_from"),
+            return_date_to=watch.get("return_date_to"),
         )
 
         if price is None:

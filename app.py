@@ -92,11 +92,15 @@ def index():
 @login_required
 def add_watch():
     if request.method == "POST":
+        trip_type = request.form.get("trip_type", "one_way")
         watch = {
             "origin": request.form["origin"].strip().upper(),
             "destination": request.form["destination"].strip().upper(),
             "date_from": request.form["date_from"],
             "date_to": request.form["date_to"],
+            "trip_type": trip_type,
+            "return_date_from": request.form.get("return_date_from") or None,
+            "return_date_to": request.form.get("return_date_to") or None,
             "passengers": int(request.form["passengers"]),
             "target_price": float(request.form["target_price"]),
             "client_name": request.form["client_name"].strip(),
