@@ -50,6 +50,19 @@
         <span class="badge badge-client">{{ w.client_name }}</span>
       </div>
 
+      <!-- booking actions (prominent, top of card) -->
+      {% if hit_target and not w.booking_reference %}
+      <div class="card-book-actions">
+        <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
+        <button class="btn-book-secondary" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
+      </div>
+      {% endif %}
+      {% if w.booking_reference %}
+      <div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);padding:6px 0;">
+        ✓ booked — ref: {{ w.booking_reference }}
+      </div>
+      {% endif %}
+
       <!-- route -->
       <div class="card-route">
         {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
@@ -92,19 +105,12 @@
       <div class="card-actions">
         <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
         <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
-        {% if hit_target and not w.booking_reference %}
-          <a href="https://app.duffel.com" target="_blank" class="btn-sm accent">book on Duffel →</a>
-          <button class="btn-sm accent" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
-        {% endif %}
-        {% if w.booking_reference %}
-          <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">✓ {{ w.booking_reference }}</span>
-        {% endif %}
         <form method="POST" action="/pause/{{ w.id }}">
-          <button class="btn-sm btn-icon" type="submit" title="Pause watch">⏸</button>
+          <button class="btn-sm" type="submit">⏸ pause</button>
         </form>
         <form method="POST" action="/delete/{{ w.id }}"
               onsubmit="return confirm('Permanently delete this watch and all its history?')">
-          <button class="btn-sm btn-icon danger" type="submit" title="Delete watch">🗑</button>
+          <button class="btn-sm danger" type="submit">delete</button>
         </form>
       </div>
 
