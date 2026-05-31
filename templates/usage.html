@@ -80,7 +80,7 @@
           {% else %}
             <div class="usage-metric">
               <span class="usage-metric-label">balance</span>
-              <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+              <a href="{{ df.dashboard_url }}" target="_blank" class="usage-dashboard-link">see dashboard →</a>
             </div>
           {% endif %}
 
@@ -128,7 +128,7 @@
 
           <div class="usage-metric">
             <span class="usage-metric-label">database size</span>
-            <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+            <a href="{{ sb.dashboard_url }}/database/usage" target="_blank" class="usage-dashboard-link">see dashboard →</a>
           </div>
 
         </div>
@@ -165,7 +165,7 @@
         </div>
         <div class="usage-metric">
           <span class="usage-metric-label">live usage</span>
-          <span class="usage-metric-value" style="color:var(--muted)">see dashboard</span>
+          <a href="{{ rd.dashboard_url }}" target="_blank" class="usage-dashboard-link">see dashboard →</a>
         </div>
       </div>
 
