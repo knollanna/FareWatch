@@ -90,6 +90,7 @@
 
       <!-- actions -->
       <div class="card-actions">
+        <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
         <form method="POST" action="/pause/{{ w.id }}">
           <button class="btn-sm" type="submit">⏸ pause</button>
         </form>
@@ -97,6 +98,11 @@
               onsubmit="return confirm('Permanently delete this watch and all its history?')">
           <button class="btn-sm danger" type="submit">delete</button>
         </form>
+      </div>
+
+      <!-- history panel -->
+      <div id="history-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:12px;">
+        <em style="font-size:13px;color:var(--muted)">Loading...</em>
       </div>
 
     </div>
@@ -280,6 +286,67 @@ function togglePaused(btn) {
 
 // If form was open before a flash (e.g. after redirect), keep it closed.
 // Auto-open if there's a validation error (future enhancement).
+
+const charts = {};
+
+async function toggleHistory(watchId, btn) {
+  const panel = document.getElementById('history-panel-' + watchId);
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? '' : 'none';
+  btn.textContent = open ? 'hide' : 'history';
+  if (!open || charts[watchId]) return;
+
+  const res = await fetch('/history/' + watchId);
+  const data = await res.json();
+
+  if (data.length < 2) {
+    panel.innerHTML = '<em style="font-size:13px;color:var(--muted)">Not enough data yet — check back after the next price check.</em>';
+    return;
+  }
+
+  const prices = data.map(d => parseFloat(d.price));
+  const labels = data.map(d => d.checked_at.slice(0, 10));
+  const min = Math.min(...prices).toFixed(2);
+  const max = Math.max(...prices).toFixed(2);
+  const current = prices[prices.length - 1].toFixed(2);
+
+  panel.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:12px;">
+      <div style="font-size:12px;color:var(--muted)">current <strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:16px">$${current}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">lowest <strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">highest <strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
+    </div>
+    <div style="position:relative;height:160px;">
+      <canvas id="chart-${watchId}"></canvas>
+    </div>`;
+
+  const ctx = document.getElementById('chart-' + watchId).getContext('2d');
+  charts[watchId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: prices,
+        borderColor: '#1D9E75',
+        backgroundColor: 'rgba(29,158,117,0.08)',
+        pointRadius: 4,
+        pointBackgroundColor: '#1D9E75',
+        tension: 0.3,
+        fill: true,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
 </script>
 
 {% endblock %}
