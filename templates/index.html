@@ -91,12 +91,68 @@
       <!-- actions -->
       <div class="card-actions">
         <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
+        <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
         <form method="POST" action="/pause/{{ w.id }}">
           <button class="btn-sm" type="submit">⏸ pause</button>
         </form>
         <form method="POST" action="/delete/{{ w.id }}"
               onsubmit="return confirm('Permanently delete this watch and all its history?')">
           <button class="btn-sm danger" type="submit">delete</button>
+        </form>
+      </div>
+
+      <!-- edit panel -->
+      <div id="edit-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
+        <form method="POST" action="/edit/{{ w.id }}">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>earliest departure</label>
+              <input type="date" name="date_from" value="{{ w.date_from }}" required>
+            </div>
+            <div class="form-field">
+              <label>latest departure</label>
+              <input type="date" name="date_to" value="{{ w.date_to }}" required>
+            </div>
+          </div>
+          {% if w.trip_type == "round_trip" %}
+          <div class="form-grid" style="margin-top:10px;">
+            <div class="form-field">
+              <label>earliest return</label>
+              <input type="date" name="return_date_from" value="{{ w.return_date_from or '' }}">
+            </div>
+            <div class="form-field">
+              <label>latest return</label>
+              <input type="date" name="return_date_to" value="{{ w.return_date_to or '' }}">
+            </div>
+          </div>
+          {% else %}
+            <input type="hidden" name="return_date_from" value="">
+            <input type="hidden" name="return_date_to" value="">
+          {% endif %}
+          <div class="form-grid" style="margin-top:10px;">
+            <div class="form-field">
+              <label>target price (USD)</label>
+              <input type="number" name="target_price" value="{{ w.target_price }}" min="1" step="0.01" required>
+            </div>
+            <div class="form-field">
+              <label>passengers</label>
+              <input type="number" name="passengers" value="{{ w.passengers }}" min="1" max="9" required>
+            </div>
+          </div>
+          <div class="form-grid" style="margin-top:10px;">
+            <div class="form-field">
+              <label>client name</label>
+              <input type="text" name="client_name" value="{{ w.client_name }}" required style="text-transform:none">
+            </div>
+            <div class="form-field">
+              <label>client email</label>
+              <input type="email" name="client_email" value="{{ w.client_email }}" required style="text-transform:none">
+            </div>
+          </div>
+          <div class="form-actions" style="margin-top:12px;">
+            <button type="button" class="btn-cancel" onclick="toggleEdit('{{ w.id }}')">cancel</button>
+            <button type="submit" class="btn-save">save changes</button>
+          </div>
         </form>
       </div>
 
@@ -286,6 +342,13 @@ function togglePaused(btn) {
 
 // If form was open before a flash (e.g. after redirect), keep it closed.
 // Auto-open if there's a validation error (future enhancement).
+
+function toggleEdit(watchId, btn) {
+  const panel = document.getElementById('edit-panel-' + watchId);
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? 'cancel' : 'edit';
+}
 
 const charts = {};
 

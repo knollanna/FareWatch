@@ -183,6 +183,24 @@ def add_watch():
     return render_template("add_watch.html")
 
 
+@app.route("/edit/<watch_id>", methods=["POST"])
+@login_required
+def edit_watch(watch_id):
+    updates = {
+        "target_price": float(request.form["target_price"]),
+        "date_from": request.form["date_from"],
+        "date_to": request.form["date_to"],
+        "passengers": int(request.form["passengers"]),
+        "client_name": request.form["client_name"].strip(),
+        "client_email": request.form["client_email"].strip(),
+        "return_date_from": request.form.get("return_date_from") or None,
+        "return_date_to": request.form.get("return_date_to") or None,
+    }
+    supabase.table("watches").update(updates).eq("id", watch_id).execute()
+    flash("Watch updated.")
+    return redirect(url_for("index"))
+
+
 @app.route("/pause/<watch_id>", methods=["POST"])
 @login_required
 def pause_watch(watch_id):
