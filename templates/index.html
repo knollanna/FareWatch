@@ -92,12 +92,33 @@
       <div class="card-actions">
         <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
         <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
+        {% if hit_target and not w.booking_reference %}
+          <a href="https://app.duffel.com" target="_blank" class="btn-sm accent">book on Duffel →</a>
+          <button class="btn-sm accent" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
+        {% endif %}
+        {% if w.booking_reference %}
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">✓ {{ w.booking_reference }}</span>
+        {% endif %}
         <form method="POST" action="/pause/{{ w.id }}">
           <button class="btn-sm" type="submit">⏸ pause</button>
         </form>
         <form method="POST" action="/delete/{{ w.id }}"
               onsubmit="return confirm('Permanently delete this watch and all its history?')">
           <button class="btn-sm danger" type="submit">delete</button>
+        </form>
+      </div>
+
+      <!-- mark as booked panel -->
+      <div id="book-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
+        <form method="POST" action="/book/{{ w.id }}">
+          <div class="form-field" style="margin-bottom:10px;">
+            <label>Duffel booking reference</label>
+            <input type="text" name="booking_reference" placeholder="e.g. DUF-ABC123" required style="text-transform:none">
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-cancel" onclick="toggleBook('{{ w.id }}')">cancel</button>
+            <button type="submit" class="btn-save">save reference</button>
+          </div>
         </form>
       </div>
 
@@ -342,6 +363,13 @@ function togglePaused(btn) {
 
 // If form was open before a flash (e.g. after redirect), keep it closed.
 // Auto-open if there's a validation error (future enhancement).
+
+function toggleBook(watchId, btn) {
+  const panel = document.getElementById('book-panel-' + watchId);
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? 'cancel' : 'mark as booked';
+}
 
 function toggleEdit(watchId, btn) {
   const panel = document.getElementById('edit-panel-' + watchId);

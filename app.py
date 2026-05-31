@@ -201,6 +201,20 @@ def edit_watch(watch_id):
     return redirect(url_for("index"))
 
 
+@app.route("/book/<watch_id>", methods=["POST"])
+@login_required
+def book_watch(watch_id):
+    import datetime as dt
+    booking_reference = request.form.get("booking_reference", "").strip()
+    if booking_reference:
+        supabase.table("watches").update({
+            "booking_reference": booking_reference,
+            "booked_at": dt.datetime.utcnow().isoformat(),
+        }).eq("id", watch_id).execute()
+        flash(f"Booking reference {booking_reference} saved.")
+    return redirect(url_for("index"))
+
+
 @app.route("/pause/<watch_id>", methods=["POST"])
 @login_required
 def pause_watch(watch_id):
