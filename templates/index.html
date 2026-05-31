@@ -100,11 +100,11 @@
           <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent)">✓ {{ w.booking_reference }}</span>
         {% endif %}
         <form method="POST" action="/pause/{{ w.id }}">
-          <button class="btn-sm" type="submit">⏸ pause</button>
+          <button class="btn-sm btn-icon" type="submit" title="Pause watch">⏸</button>
         </form>
         <form method="POST" action="/delete/{{ w.id }}"
               onsubmit="return confirm('Permanently delete this watch and all its history?')">
-          <button class="btn-sm danger" type="submit">delete</button>
+          <button class="btn-sm btn-icon danger" type="submit" title="Delete watch">🗑</button>
         </form>
       </div>
 
@@ -300,11 +300,11 @@
           </div>
           <div class="card-actions">
             <form method="POST" action="/resume/{{ w.id }}">
-              <button class="btn-sm accent" type="submit">▶ resume</button>
+              <button class="btn-sm accent" type="submit" title="Resume watch">▶ resume</button>
             </form>
             <form method="POST" action="/delete/{{ w.id }}"
                   onsubmit="return confirm('Permanently delete this watch?')">
-              <button class="btn-sm danger" type="submit">delete</button>
+              <button class="btn-sm btn-icon danger" type="submit" title="Delete watch">🗑</button>
             </form>
           </div>
         </div>
