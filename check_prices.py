@@ -13,18 +13,19 @@ supabase = create_client(
 )
 
 
-def already_alerted_today(watch_id):
-    """Return True if we already sent an alert for this watch today."""
-    today = datetime.date.today().isoformat()
+def get_previous_lowest(watch_id):
+    """Return the lowest price ever recorded for this watch, or None if no history."""
     result = (
-        supabase.table("sent_alerts")
-        .select("id")
+        supabase.table("price_history")
+        .select("price")
         .eq("watch_id", watch_id)
-        .gte("sent_at", f"{today}T00:00:00")
+        .order("price", desc=False)
         .limit(1)
         .execute()
     )
-    return len(result.data) > 0
+    if result.data:
+        return float(result.data[0]["price"])
+    return None
 
 
 def set_error(watch_id, message):
@@ -91,17 +92,20 @@ def check_all_watches():
         if flight_details:
             print(f"  Flight: {flight_details['flight_number']} | {flight_details['trip_type']} | Departs {flight_details['departing_at']}")
 
-        # Send alert if target is met and we haven't already sent one today
+        # Send alert if price is at/below target AND is a new lowest price
         if price <= target:
-            if already_alerted_today(watch["id"]):
-                print(f"  [alert] Already sent an alert today — skipping.")
-            else:
+            previous_lowest = get_previous_lowest(watch["id"])
+            is_new_low = previous_lowest is None or price < previous_lowest
+            if is_new_low:
+                print(f"  New lowest price found — sending alert.")
                 success = send_alert(watch, price, flight_details)
                 if success:
                     supabase.table("sent_alerts").insert({
                         "watch_id": watch["id"],
                         "price": price,
                     }).execute()
+            else:
+                print(f"  [alert] Price is at target but not a new low (previous low: {currency} {previous_lowest:.2f}) — skipping.")
 
         print()
 
