@@ -66,13 +66,7 @@
       <span>{{ w.passengers }} pax</span>
       <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
       {% if lp %}
-        {% if lp.stops_outbound is not none %}
-          {% if lp.stops_outbound == 0 %}
-            <span>Direct</span>
-          {% else %}
-            <span>{{ lp.stops_outbound }} stop{{ 's' if lp.stops_outbound > 1 }}{% if lp.connection_airports %} · {{ lp.connection_airports }}{% endif %}</span>
-          {% endif %}
-        {% endif %}
+        {% if lp.stops_text %}<span>{{ lp.stops_text }}</span>{% endif %}
         <span>checked {{ lp.checked_at[:10] }}</span>
       {% else %}
         <span>not checked yet</span>

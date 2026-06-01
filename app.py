@@ -30,6 +30,36 @@ def login_required(f):
     return decorated
 
 
+def _stops_text(lp, trip_type):
+    """Human-readable stops summary, splitting connections per leg.
+
+    connection_airports is stored as outbound connections then inbound
+    connections (combined), so we split it at the outbound stop count.
+    """
+    if not lp or lp.get("stops_outbound") is None:
+        return None
+    conns = [c.strip() for c in (lp.get("connection_airports") or "").split(",") if c.strip()]
+    so = lp.get("stops_outbound") or 0
+    si = lp.get("stops_inbound")
+    out_conns = conns[:so]
+
+    def leg(stops, c):
+        if not stops:
+            return "direct"
+        label = f"{stops} stop{'s' if stops > 1 else ''}"
+        return f"{label} ({', '.join(c)})" if c else label
+
+    # One-way (or missing inbound info): keep the simple original style
+    if trip_type != "round_trip" or si is None:
+        if so == 0:
+            return "Direct"
+        return f"{so} stop{'s' if so > 1 else ''}" + (f" · {', '.join(out_conns)}" if out_conns else "")
+
+    # Round-trip: show each leg separately
+    in_conns = conns[so:so + si]
+    return f"out {leg(so, out_conns)} · ret {leg(si, in_conns)}"
+
+
 def _attach_watch_extras(watches):
     """Attach latest_price and alert_sent_today to each watch dict."""
     today = datetime.date.today().isoformat()
@@ -44,6 +74,8 @@ def _attach_watch_extras(watches):
             .data
         )
         watch["latest_price"] = latest[0] if latest else None
+        if watch["latest_price"]:
+            watch["latest_price"]["stops_text"] = _stops_text(watch["latest_price"], watch.get("trip_type"))
 
         alert_today = (
             supabase.table("sent_alerts")
@@ -357,6 +389,8 @@ def client_page(token):
             .data
         )
         watch["latest_price"] = latest[0] if latest else None
+        if watch["latest_price"]:
+            watch["latest_price"]["stops_text"] = _stops_text(watch["latest_price"], watch.get("trip_type"))
 
     client_name = watches[0]["client_name"]
     updated_at = datetime.datetime.now().strftime("%-d %B %Y at %-I:%M %p")
