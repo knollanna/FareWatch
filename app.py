@@ -157,9 +157,9 @@ def index():
                            recent_alerts=recent_alerts)
 
 
-def _get_or_create_token(client_email):
-    """Return existing token for this client email, or generate a new one."""
-    import uuid
+def _get_or_create_token(client_email, client_name=""):
+    """Return existing token for this client email, or generate a new readable one."""
+    import uuid, re
     existing = (
         supabase.table("watches")
         .select("client_token")
@@ -171,7 +171,9 @@ def _get_or_create_token(client_email):
     )
     if existing and existing[0].get("client_token"):
         return existing[0]["client_token"]
-    return str(uuid.uuid4())
+    slug = re.sub(r'[^a-z0-9]+', '-', client_name.lower()).strip('-') or "client"
+    suffix = uuid.uuid4().hex[:4]
+    return f"{slug}-{suffix}"
 
 
 @app.route("/add", methods=["GET", "POST"])
@@ -192,7 +194,7 @@ def add_watch():
             "target_price": float(request.form["target_price"]),
             "client_name": request.form["client_name"].strip(),
             "client_email": client_email,
-            "client_token": _get_or_create_token(client_email),
+            "client_token": _get_or_create_token(client_email, request.form["client_name"].strip()),
             "is_active": True,
             "is_paused": False,
         }
