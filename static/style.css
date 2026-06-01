@@ -509,6 +509,78 @@ input, select { font-family: var(--font-sans); }
 }
 .btn-login:hover { background: #179060; }
 
+/* ─── Client groups ──────────────────────────────────────────────────────────── */
+.client-group { margin-bottom: 32px; }
+.client-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid var(--border);
+}
+.client-group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.client-group-count {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 13px;
+  margin-left: 4px;
+}
+.group-add-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: none;
+  border: 0.5px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  transition: all 0.15s;
+}
+.group-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+.paused-card { opacity: 0.6; }
+.paused-card:hover { opacity: 0.85; }
+
+/* ─── Airport autocomplete ───────────────────────────────────────────────────── */
+.airport-field { position: relative; }
+.airport-input { text-transform: uppercase; }
+.airport-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.10);
+  z-index: 50;
+  overflow: hidden;
+}
+.airport-opt {
+  padding: 9px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+}
+.airport-opt:hover, .airport-opt.active { background: var(--accent-light); }
+.airport-opt .ac-code {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text);
+}
+.airport-opt .ac-sep { color: var(--muted); }
+.airport-opt .ac-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.airport-opt .ac-city { color: var(--muted); font-size: 12px; margin-left: auto; padding-left: 8px; }
+
 /* ─── Usage page ─────────────────────────────────────────────────────────────── */
 .usage-grid {
   display: grid;

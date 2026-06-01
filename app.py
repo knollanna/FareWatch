@@ -122,6 +122,49 @@ def logout():
     return redirect(url_for("login"))
 
 
+def _group_by_client(active_watches, paused_watches):
+    """
+    Group watches by client into an ordered list of groups.
+    'My Watches' (client_name empty or 'mine') first, then clients A→Z.
+    Each group: {key, name, email, active: [...], paused: [...]}.
+    """
+    groups = {}  # key -> group dict
+
+    def group_key(w):
+        name = (w.get("client_name") or "").strip()
+        if not name or name.lower() == "mine":
+            return "__mine__"
+        return name
+
+    for w in active_watches:
+        key = group_key(w)
+        g = groups.setdefault(key, {"key": key, "active": [], "paused": [],
+                                    "name": None, "email": ""})
+        g["active"].append(w)
+    for w in paused_watches:
+        key = group_key(w)
+        g = groups.setdefault(key, {"key": key, "active": [], "paused": [],
+                                    "name": None, "email": ""})
+        g["paused"].append(w)
+
+    # Fill display name + a representative email per group
+    for key, g in groups.items():
+        sample = (g["active"] + g["paused"])[0]
+        if key == "__mine__":
+            g["name"] = "My Watches"
+            g["email"] = sample.get("client_email", "") if (sample.get("client_name") or "").lower() == "mine" else ""
+        else:
+            g["name"] = key
+            g["email"] = sample.get("client_email", "")
+
+    # Order: My Watches first, then alphabetical by name (case-insensitive)
+    ordered = sorted(
+        groups.values(),
+        key=lambda g: (0 if g["key"] == "__mine__" else 1, g["name"].lower())
+    )
+    return ordered
+
+
 @app.route("/")
 @login_required
 def index():
@@ -147,12 +190,12 @@ def index():
     _attach_watch_extras(active_watches)
     _attach_watch_extras(paused_watches)
 
+    groups = _group_by_client(active_watches, paused_watches)
     metrics = _get_metrics(active_watches, all_watches)
     recent_alerts = _get_recent_alerts()
 
     return render_template("index.html",
-                           watches=active_watches,
-                           paused_watches=paused_watches,
+                           groups=groups,
                            metrics=metrics,
                            recent_alerts=recent_alerts)
 
@@ -208,6 +251,8 @@ def add_watch():
 @login_required
 def edit_watch(watch_id):
     updates = {
+        "origin": request.form["origin"].strip().upper(),
+        "destination": request.form["destination"].strip().upper(),
         "target_price": float(request.form["target_price"]),
         "date_from": request.form["date_from"],
         "date_to": request.form["date_to"],

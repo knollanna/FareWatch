@@ -1,5 +1,215 @@
 {% extends "base.html" %}
 {% block content %}
+
+{# ─────────────── Active watch card macro ─────────────── #}
+{% macro active_card(w) %}
+  {% set lp = w.latest_price %}
+  {% set hit_target = lp and lp.price <= w.target_price %}
+  {% if lp %}
+    {% set progress = [[((w.target_price / lp.price) * 100)|round(1), 100]|min, 0]|max %}
+  {% else %}
+    {% set progress = 0 %}
+  {% endif %}
+
+  <div class="watch-card {{ 'target-met' if hit_target }}">
+
+    <div class="card-badges">
+      <div>
+        {% if hit_target %}
+          <span class="badge badge-drop">price drop ✓</span>
+        {% elif w.last_error %}
+          <span class="badge badge-error" title="{{ w.last_error }}">⚠ error</span>
+        {% elif w.alert_sent_today %}
+          <span class="badge badge-alert">alert sent today</span>
+        {% endif %}
+      </div>
+      <span class="badge badge-client">
+        {{ w.client_name }}
+        {% if w.client_token %}
+          <span class="copy-link-btn" onclick="copyClientLink('{{ w.client_token }}', this)" title="Copy client link">⎘</span>
+        {% endif %}
+      </span>
+    </div>
+
+    {% if hit_target and not w.booking_reference %}
+    <div class="card-book-actions">
+      <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
+      <button class="btn-book-secondary" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
+    </div>
+    {% endif %}
+    {% if w.booking_reference %}
+    <div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);padding:6px 0;">
+      ✓ booked — ref: {{ w.booking_reference }}
+    </div>
+    {% endif %}
+
+    <div class="card-route">
+      {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
+    </div>
+
+    <div class="card-meta">
+      <span>{{ w.date_from }} – {{ w.date_to }}</span>
+      <span>{{ w.passengers }} pax</span>
+      <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
+      {% if lp %}
+        {% if lp.stops_outbound is not none %}
+          {% if lp.stops_outbound == 0 %}
+            <span>Direct</span>
+          {% else %}
+            <span>{{ lp.stops_outbound }} stop{{ 's' if lp.stops_outbound > 1 }}{% if lp.connection_airports %} · {{ lp.connection_airports }}{% endif %}</span>
+          {% endif %}
+        {% endif %}
+        <span>checked {{ lp.checked_at[:10] }}</span>
+      {% else %}
+        <span>not checked yet</span>
+      {% endif %}
+    </div>
+
+    <div class="card-prices">
+      <div class="price-current {{ 'on-target' if hit_target }}">
+        {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.price) }}{% else %}—{% endif %}
+      </div>
+      <div class="price-target-label">
+        target
+        <strong>${{ "%.2f"|format(w.target_price) }}</strong>
+      </div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-fill {{ 'on-target' if hit_target }}" style="width: {{ progress }}%"></div>
+    </div>
+
+    <div class="card-actions">
+      <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
+      <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
+      <form method="POST" action="/pause/{{ w.id }}">
+        <button class="btn-sm" type="submit">⏸ pause</button>
+      </form>
+      <form method="POST" action="/delete/{{ w.id }}"
+            onsubmit="return confirm('Permanently delete this watch and all its history?')">
+        <button class="btn-sm danger" type="submit">delete</button>
+      </form>
+    </div>
+
+    <!-- mark as booked panel -->
+    <div id="book-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
+      <form method="POST" action="/book/{{ w.id }}">
+        <div class="form-field" style="margin-bottom:10px;">
+          <label>Duffel booking reference</label>
+          <input type="text" name="booking_reference" placeholder="e.g. DUF-ABC123" required style="text-transform:none">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-cancel" onclick="toggleBook('{{ w.id }}')">cancel</button>
+          <button type="submit" class="btn-save">save reference</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- edit panel -->
+    <div id="edit-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
+      <form method="POST" action="/edit/{{ w.id }}">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>from</label>
+            <div class="airport-field">
+              <input type="text" class="airport-input" name="origin" value="{{ w.origin }}" autocomplete="off" required>
+            </div>
+          </div>
+          <div class="form-field">
+            <label>to</label>
+            <div class="airport-field">
+              <input type="text" class="airport-input" name="destination" value="{{ w.destination }}" autocomplete="off" required>
+            </div>
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-field">
+            <label>earliest departure</label>
+            <input type="date" name="date_from" value="{{ w.date_from }}" required>
+          </div>
+          <div class="form-field">
+            <label>latest departure</label>
+            <input type="date" name="date_to" value="{{ w.date_to }}" required>
+          </div>
+        </div>
+        {% if w.trip_type == "round_trip" %}
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-field">
+            <label>earliest return</label>
+            <input type="date" name="return_date_from" value="{{ w.return_date_from or '' }}">
+          </div>
+          <div class="form-field">
+            <label>latest return</label>
+            <input type="date" name="return_date_to" value="{{ w.return_date_to or '' }}">
+          </div>
+        </div>
+        {% else %}
+          <input type="hidden" name="return_date_from" value="">
+          <input type="hidden" name="return_date_to" value="">
+        {% endif %}
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-field">
+            <label>target price (USD)</label>
+            <input type="number" name="target_price" value="{{ w.target_price }}" min="1" step="0.01" required>
+          </div>
+          <div class="form-field">
+            <label>passengers</label>
+            <input type="number" name="passengers" value="{{ w.passengers }}" min="1" max="9" required>
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-field">
+            <label>client name</label>
+            <input type="text" name="client_name" value="{{ w.client_name }}" required style="text-transform:none">
+          </div>
+          <div class="form-field">
+            <label>client email</label>
+            <input type="email" name="client_email" value="{{ w.client_email }}" required style="text-transform:none">
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:12px;">
+          <button type="button" class="btn-cancel" onclick="toggleEdit('{{ w.id }}')">cancel</button>
+          <button type="submit" class="btn-save">save changes</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- history panel -->
+    <div id="history-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:12px;">
+      <em style="font-size:13px;color:var(--muted)">Loading...</em>
+    </div>
+
+  </div>
+{% endmacro %}
+
+{# ─────────────── Paused watch card macro ─────────────── #}
+{% macro paused_card(w) %}
+  {% set lp = w.latest_price %}
+  <div class="watch-card paused-card">
+    <div class="card-badges">
+      <span class="badge badge-paused">paused</span>
+      <span class="badge badge-client">{{ w.client_name }}</span>
+    </div>
+    <div class="card-route">
+      {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
+    </div>
+    <div class="card-meta">
+      <span>{{ w.date_from }} – {{ w.date_to }}</span>
+      <span>{{ w.passengers }} pax</span>
+      {% if lp %}<span>last ${{ "%.2f"|format(lp.price) }}</span>{% endif %}
+    </div>
+    <div class="card-actions">
+      <form method="POST" action="/resume/{{ w.id }}">
+        <button class="btn-sm accent" type="submit" title="Resume watch">▶ resume</button>
+      </form>
+      <form method="POST" action="/delete/{{ w.id }}"
+            onsubmit="return confirm('Permanently delete this watch?')">
+        <button class="btn-sm danger" type="submit">🗑 delete</button>
+      </form>
+    </div>
+  </div>
+{% endmacro %}
+
 <div class="page">
 
   <!-- ── Metrics row ─────────────────────────────────────────────────────── -->
@@ -22,224 +232,63 @@
     </div>
   </div>
 
-  <!-- ── Active watch cards ─────────────────────────────────────────────── -->
-  {% if watches %}
-  <div class="cards-grid">
-    {% for w in watches %}
-    {% set lp = w.latest_price %}
-    {% set hit_target = lp and lp.price <= w.target_price %}
-    {% if lp %}
-      {% set progress = [[((w.target_price / lp.price) * 100)|round(1), 100]|min, 0]|max %}
-    {% else %}
-      {% set progress = 0 %}
-    {% endif %}
-
-    <div class="watch-card {{ 'target-met' if hit_target }}">
-
-      <!-- badges -->
-      <div class="card-badges">
-        <div>
-          {% if hit_target %}
-            <span class="badge badge-drop">price drop ✓</span>
-          {% elif w.last_error %}
-            <span class="badge badge-error" title="{{ w.last_error }}">⚠ error</span>
-          {% elif w.alert_sent_today %}
-            <span class="badge badge-alert">alert sent today</span>
-          {% endif %}
+  <!-- ── Grouped watches ─────────────────────────────────────────────────── -->
+  {% if groups %}
+    {% for g in groups %}
+    <div class="client-group">
+      <div class="client-group-header">
+        <div class="client-group-title">
+          {{ g.name }}
+          <span class="client-group-count">· {{ g.active|length }} watch{{ 'es' if g.active|length != 1 else '' }}</span>
         </div>
-        <span class="badge badge-client">
-          {{ w.client_name }}
-          {% if w.client_token %}
-            <span class="copy-link-btn" onclick="copyClientLink('{{ w.client_token }}', this)" title="Copy client link">⎘</span>
-          {% endif %}
-        </span>
+        <button class="group-add-btn"
+                onclick="openAddForm({{ ('' if g.key == '__mine__' else g.name)|tojson }}, {{ g.email|tojson }})">
+          + add
+        </button>
       </div>
 
-      <!-- booking actions (prominent, top of card) -->
-      {% if hit_target and not w.booking_reference %}
-      <div class="card-book-actions">
-        <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
-        <button class="btn-book-secondary" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
+      <div class="cards-grid">
+        {% for w in g.active %}{{ active_card(w) }}{% endfor %}
+        {% for w in g.paused %}{{ paused_card(w) }}{% endfor %}
       </div>
-      {% endif %}
-      {% if w.booking_reference %}
-      <div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);padding:6px 0;">
-        ✓ booked — ref: {{ w.booking_reference }}
-      </div>
-      {% endif %}
-
-      <!-- route -->
-      <div class="card-route">
-        {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
-      </div>
-
-      <!-- metadata -->
-      <div class="card-meta">
-        <span>{{ w.date_from }} – {{ w.date_to }}</span>
-        <span>{{ w.passengers }} pax</span>
-        <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
-        {% if lp %}
-          {% if lp.stops_outbound is not none %}
-            {% if lp.stops_outbound == 0 %}
-              <span>Direct</span>
-            {% else %}
-              <span>{{ lp.stops_outbound }} stop{{ 's' if lp.stops_outbound > 1 }}{% if lp.connection_airports %} · {{ lp.connection_airports }}{% endif %}</span>
-            {% endif %}
-          {% endif %}
-          <span>checked {{ lp.checked_at[:10] }}</span>
-        {% else %}
-          <span>not checked yet</span>
-        {% endif %}
-      </div>
-
-      <!-- prices -->
-      <div class="card-prices">
-        <div class="price-current {{ 'on-target' if hit_target }}">
-          {% if lp %}
-            {{ lp.currency }} {{ "%.2f"|format(lp.price) }}
-          {% else %}
-            —
-          {% endif %}
-        </div>
-        <div class="price-target-label">
-          target
-          <strong>${{ "%.2f"|format(w.target_price) }}</strong>
-        </div>
-      </div>
-
-      <!-- progress bar -->
-      <div class="progress-wrap">
-        <div class="progress-fill {{ 'on-target' if hit_target }}"
-             style="width: {{ progress }}%"></div>
-      </div>
-
-      <!-- actions -->
-      <div class="card-actions">
-        <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
-        <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
-        <form method="POST" action="/pause/{{ w.id }}">
-          <button class="btn-sm" type="submit">⏸ pause</button>
-        </form>
-        <form method="POST" action="/delete/{{ w.id }}"
-              onsubmit="return confirm('Permanently delete this watch and all its history?')">
-          <button class="btn-sm danger" type="submit">delete</button>
-        </form>
-      </div>
-
-      <!-- mark as booked panel -->
-      <div id="book-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
-        <form method="POST" action="/book/{{ w.id }}">
-          <div class="form-field" style="margin-bottom:10px;">
-            <label>Duffel booking reference</label>
-            <input type="text" name="booking_reference" placeholder="e.g. DUF-ABC123" required style="text-transform:none">
-          </div>
-          <div class="form-actions">
-            <button type="button" class="btn-cancel" onclick="toggleBook('{{ w.id }}')">cancel</button>
-            <button type="submit" class="btn-save">save reference</button>
-          </div>
-        </form>
-      </div>
-
-      <!-- edit panel -->
-      <div id="edit-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:14px;">
-        <form method="POST" action="/edit/{{ w.id }}">
-          <div class="form-grid">
-            <div class="form-field">
-              <label>earliest departure</label>
-              <input type="date" name="date_from" value="{{ w.date_from }}" required>
-            </div>
-            <div class="form-field">
-              <label>latest departure</label>
-              <input type="date" name="date_to" value="{{ w.date_to }}" required>
-            </div>
-          </div>
-          {% if w.trip_type == "round_trip" %}
-          <div class="form-grid" style="margin-top:10px;">
-            <div class="form-field">
-              <label>earliest return</label>
-              <input type="date" name="return_date_from" value="{{ w.return_date_from or '' }}">
-            </div>
-            <div class="form-field">
-              <label>latest return</label>
-              <input type="date" name="return_date_to" value="{{ w.return_date_to or '' }}">
-            </div>
-          </div>
-          {% else %}
-            <input type="hidden" name="return_date_from" value="">
-            <input type="hidden" name="return_date_to" value="">
-          {% endif %}
-          <div class="form-grid" style="margin-top:10px;">
-            <div class="form-field">
-              <label>target price (USD)</label>
-              <input type="number" name="target_price" value="{{ w.target_price }}" min="1" step="0.01" required>
-            </div>
-            <div class="form-field">
-              <label>passengers</label>
-              <input type="number" name="passengers" value="{{ w.passengers }}" min="1" max="9" required>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-top:10px;">
-            <div class="form-field">
-              <label>client name</label>
-              <input type="text" name="client_name" value="{{ w.client_name }}" required style="text-transform:none">
-            </div>
-            <div class="form-field">
-              <label>client email</label>
-              <input type="email" name="client_email" value="{{ w.client_email }}" required style="text-transform:none">
-            </div>
-          </div>
-          <div class="form-actions" style="margin-top:12px;">
-            <button type="button" class="btn-cancel" onclick="toggleEdit('{{ w.id }}')">cancel</button>
-            <button type="submit" class="btn-save">save changes</button>
-          </div>
-        </form>
-      </div>
-
-      <!-- history panel -->
-      <div id="history-panel-{{ w.id }}" style="display:none;margin-top:8px;border-top:0.5px solid var(--border);padding-top:12px;">
-        <em style="font-size:13px;color:var(--muted)">Loading...</em>
-      </div>
-
     </div>
     {% endfor %}
-  </div>
   {% else %}
-    <p style="color:var(--muted);font-size:14px;margin-bottom:24px;">No active watches yet.</p>
+    <p style="color:var(--muted);font-size:14px;margin-bottom:24px;">No watches yet. Add your first one below.</p>
   {% endif %}
 
   <!-- ── Add fare watch ─────────────────────────────────────────────────── -->
-  <button class="add-watch-btn" onclick="toggleAddForm(this)">+ add fare watch</button>
+  <button class="add-watch-btn" id="add-watch-btn" onclick="openAddForm('', '')">+ add fare watch</button>
 
   <div class="add-form-wrap" id="add-form-wrap">
     <h3>New fare watch</h3>
     <form method="POST" action="/add">
 
-      <!-- trip type toggle -->
       <div style="margin-bottom:16px;">
         <div style="font-size:12px;font-weight:500;color:var(--muted);margin-bottom:8px;">trip type</div>
         <div class="trip-toggle">
-          <input type="radio" name="trip_type" id="tt_oneway" value="one_way" checked
-                 onchange="toggleReturnDates()">
+          <input type="radio" name="trip_type" id="tt_oneway" value="one_way" checked onchange="toggleReturnDates()">
           <label for="tt_oneway">one-way</label>
-          <input type="radio" name="trip_type" id="tt_round" value="round_trip"
-                 onchange="toggleReturnDates()">
+          <input type="radio" name="trip_type" id="tt_round" value="round_trip" onchange="toggleReturnDates()">
           <label for="tt_round">round-trip</label>
         </div>
       </div>
 
-      <!-- from / to -->
       <div class="form-grid">
         <div class="form-field">
           <label for="f_origin">from</label>
-          <input type="text" id="f_origin" name="origin" maxlength="3" placeholder="JFK" required>
+          <div class="airport-field">
+            <input type="text" id="f_origin" class="airport-input" name="origin" placeholder="city, airport, or code" autocomplete="off" required>
+          </div>
         </div>
         <div class="form-field">
           <label for="f_dest">to</label>
-          <input type="text" id="f_dest" name="destination" maxlength="3" placeholder="CDG" required>
+          <div class="airport-field">
+            <input type="text" id="f_dest" class="airport-input" name="destination" placeholder="city, airport, or code" autocomplete="off" required>
+          </div>
         </div>
       </div>
 
-      <!-- depart dates -->
       <div class="form-grid">
         <div class="form-field">
           <label for="f_date_from">earliest departure</label>
@@ -251,7 +300,6 @@
         </div>
       </div>
 
-      <!-- return dates (round-trip only) -->
       <div class="form-grid return-dates" id="return-dates">
         <div class="form-field">
           <label for="f_ret_from">earliest return</label>
@@ -263,7 +311,6 @@
         </div>
       </div>
 
-      <!-- target / client -->
       <div class="form-grid">
         <div class="form-field">
           <label for="f_target">target price (USD)</label>
@@ -287,50 +334,11 @@
       </div>
 
       <div class="form-actions">
-        <button type="button" class="btn-cancel" onclick="toggleAddForm()">cancel</button>
+        <button type="button" class="btn-cancel" onclick="closeAddForm()">cancel</button>
         <button type="submit" class="btn-save">save watch</button>
       </div>
     </form>
   </div>
-
-  <!-- ── Paused watches ─────────────────────────────────────────────────── -->
-  {% if paused_watches %}
-  <div class="paused-section">
-    <button class="paused-toggle" onclick="togglePaused(this)">
-      <span>▶</span> paused watches ({{ paused_watches|length }})
-    </button>
-    <div id="paused-list" style="display:none">
-      <div class="cards-grid">
-        {% for w in paused_watches %}
-        {% set lp = w.latest_price %}
-        <div class="watch-card" style="opacity:0.65">
-          <div class="card-badges">
-            <span class="badge badge-paused">paused</span>
-            <span class="badge badge-client">{{ w.client_name }}</span>
-          </div>
-          <div class="card-route">
-            {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
-          </div>
-          <div class="card-meta">
-            <span>{{ w.date_from }} – {{ w.date_to }}</span>
-            <span>{{ w.passengers }} pax</span>
-            {% if lp %}<span>last ${{ "%.2f"|format(lp.price) }}</span>{% endif %}
-          </div>
-          <div class="card-actions">
-            <form method="POST" action="/resume/{{ w.id }}">
-              <button class="btn-sm accent" type="submit" title="Resume watch">▶ resume</button>
-            </form>
-            <form method="POST" action="/delete/{{ w.id }}"
-                  onsubmit="return confirm('Permanently delete this watch?')">
-              <button class="btn-sm btn-icon danger" type="submit" title="Delete watch">🗑</button>
-            </form>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-  {% endif %}
 
   <!-- ── Recent alerts ──────────────────────────────────────────────────── -->
   <div class="alerts-section">
@@ -358,10 +366,18 @@
 </div>
 
 <script>
-function toggleAddForm(btn) {
+// ─── Add form open/close with optional client pre-fill ───
+function openAddForm(clientName, clientEmail) {
   const wrap = document.getElementById('add-form-wrap');
-  const isOpen = wrap.classList.toggle('open');
-  if (btn) btn.style.display = isOpen ? 'none' : '';
+  wrap.classList.add('open');
+  document.getElementById('add-watch-btn').style.display = 'none';
+  if (clientName) document.getElementById('f_name').value = clientName;
+  if (clientEmail) document.getElementById('f_email').value = clientEmail;
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function closeAddForm() {
+  document.getElementById('add-form-wrap').classList.remove('open');
+  document.getElementById('add-watch-btn').style.display = '';
 }
 
 function toggleReturnDates() {
@@ -371,16 +387,6 @@ function toggleReturnDates() {
   document.getElementById('f_ret_from').required = isRound;
   document.getElementById('f_ret_to').required = isRound;
 }
-
-function togglePaused(btn) {
-  const list = document.getElementById('paused-list');
-  const open = list.style.display === 'none';
-  list.style.display = open ? '' : 'none';
-  btn.querySelector('span').textContent = open ? '▼' : '▶';
-}
-
-// If form was open before a flash (e.g. after redirect), keep it closed.
-// Auto-open if there's a validation error (future enhancement).
 
 function copyClientLink(token, el) {
   const url = `https://farewatch.annaknoll.com/client/${token}`;
@@ -406,8 +412,110 @@ function toggleEdit(watchId, btn) {
   if (btn) btn.textContent = open ? 'cancel' : 'edit';
 }
 
-const charts = {};
+// ─── Airport autocomplete ───
+let _airportsPromise = null;
+function loadAirports() {
+  if (!_airportsPromise) {
+    _airportsPromise = fetch('/static/airports.json').then(r => r.json());
+  }
+  return _airportsPromise;
+}
 
+function searchAirports(airports, q) {
+  q = q.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const scored = [];
+  for (const a of airports) {
+    const code = a.iata_code.toLowerCase();
+    const name = (a.name || '').toLowerCase();
+    const city = (a.municipality || '').toLowerCase();
+    let score = -1;
+    if (code === q) score = 0;
+    else if (code.startsWith(q)) score = 1;
+    else if (city.startsWith(q)) score = 2;
+    else if (name.startsWith(q)) score = 3;
+    else if (city.includes(q)) score = 4;
+    else if (name.includes(q)) score = 5;
+    else if (code.includes(q)) score = 6;
+    if (score >= 0) scored.push([score, a]);
+  }
+  scored.sort((x, y) =>
+    x[0] - y[0] ||
+    (x[1].type === y[1].type ? 0 : (x[1].type === 'large_airport' ? -1 : 1))
+  );
+  return scored.slice(0, 6).map(s => s[1]);
+}
+
+function attachAirportAutocomplete(input) {
+  if (input.dataset.acReady) return;
+  input.dataset.acReady = '1';
+
+  const field = input.closest('.airport-field') || input.parentNode;
+  const dropdown = document.createElement('div');
+  dropdown.className = 'airport-dropdown';
+  dropdown.style.display = 'none';
+  field.appendChild(dropdown);
+
+  let items = [];
+  let active = -1;
+
+  function close() { dropdown.style.display = 'none'; active = -1; items = []; }
+
+  function render(results) {
+    if (!results.length) { close(); return; }
+    items = results;
+    active = -1;
+    dropdown.innerHTML = results.map((a, i) => `
+      <div class="airport-opt" data-i="${i}">
+        <span class="ac-code">${a.iata_code}</span>
+        <span class="ac-sep">·</span>
+        <span class="ac-name">${a.name}</span>
+        <span class="ac-city">${a.municipality}${a.municipality ? ', ' : ''}${a.country}</span>
+      </div>`).join('');
+    dropdown.style.display = '';
+    dropdown.querySelectorAll('.airport-opt').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        select(parseInt(el.dataset.i));
+      });
+    });
+  }
+
+  function highlight() {
+    dropdown.querySelectorAll('.airport-opt').forEach((el, i) =>
+      el.classList.toggle('active', i === active));
+  }
+
+  function select(i) {
+    if (i < 0 || i >= items.length) return;
+    input.value = items[i].iata_code;
+    close();
+  }
+
+  input.addEventListener('input', async () => {
+    if (input.value.trim().length < 2) { close(); return; }
+    const airports = await loadAirports();
+    render(searchAirports(airports, input.value));
+  });
+
+  input.addEventListener('keydown', e => {
+    if (dropdown.style.display === 'none') return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, items.length - 1); highlight(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); highlight(); }
+    else if (e.key === 'Enter') { if (active >= 0) { e.preventDefault(); select(active); } }
+    else if (e.key === 'Escape') { close(); }
+  });
+
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.airport-input').forEach(attachAirportAutocomplete);
+  loadAirports();  // warm the cache
+});
+
+// ─── Price history chart ───
+const charts = {};
 async function toggleHistory(watchId, btn) {
   const panel = document.getElementById('history-panel-' + watchId);
   const open = panel.style.display === 'none';
