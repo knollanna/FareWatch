@@ -68,6 +68,12 @@ def _build_email_html(watch, price, flight_details):
     currency = "USD"
 
     pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
+    if passengers > 1:
+        price_note = f" total ({currency} {price / passengers:.2f} per person)"
+        target_note = f" total ({currency} {target_price / passengers:.2f} per person)"
+    else:
+        price_note = ""
+        target_note = ""
     exact_date = flight_details["departing_at"] if flight_details else None
     google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
 
@@ -160,11 +166,11 @@ def _build_email_html(watch, price, flight_details):
     </tr>{flight_rows}
     <tr>
       <td style="padding:10px 14px;font-weight:bold;">Current price</td>
-      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}</td>
+      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}{price_note}</td>
     </tr>
     <tr style="background:#f5f5f5;">
       <td style="padding:10px 14px;font-weight:bold;">Your target</td>
-      <td style="padding:10px 14px;">{currency} {target_price:.2f}</td>
+      <td style="padding:10px 14px;">{currency} {target_price:.2f}{target_note}</td>
     </tr>
   </table>
 
@@ -224,8 +230,8 @@ Great news — a fare has dropped to your target price for your trip!
 Route: {origin} → {destination}
 Travel window: {date_from} – {date_to}
 Passengers: {passengers}
-{flight_lines}Current price: {currency} {price:.2f}
-Your target: {currency} {target_price:.2f}
+{flight_lines}Current price: {currency} {price:.2f}{f" total ({currency} {price / passengers:.2f} per person)" if passengers > 1 else ""}
+Your target: {currency} {target_price:.2f}{f" total ({currency} {target_price / passengers:.2f} per person)" if passengers > 1 else ""}
 
 {search_tip}
 

@@ -234,7 +234,8 @@ def add_watch():
             "return_date_from": request.form.get("return_date_from") or None,
             "return_date_to": request.form.get("return_date_to") or None,
             "passengers": int(request.form["passengers"]),
-            "target_price": float(request.form["target_price"]),
+            # Form input is per-person; store the total (per-person × passengers)
+            "target_price": round(float(request.form["target_price"]) * int(request.form["passengers"]), 2),
             "client_name": request.form["client_name"].strip(),
             "client_email": client_email,
             "client_token": _get_or_create_token(client_email, request.form["client_name"].strip()),
@@ -250,13 +251,15 @@ def add_watch():
 @app.route("/edit/<watch_id>", methods=["POST"])
 @login_required
 def edit_watch(watch_id):
+    passengers = int(request.form["passengers"])
     updates = {
         "origin": request.form["origin"].strip().upper(),
         "destination": request.form["destination"].strip().upper(),
-        "target_price": float(request.form["target_price"]),
+        # Form input is per-person; store the total (per-person × passengers)
+        "target_price": round(float(request.form["target_price"]) * passengers, 2),
         "date_from": request.form["date_from"],
         "date_to": request.form["date_to"],
-        "passengers": int(request.form["passengers"]),
+        "passengers": passengers,
         "client_name": request.form["client_name"].strip(),
         "client_email": request.form["client_email"].strip(),
         "return_date_from": request.form.get("return_date_from") or None,

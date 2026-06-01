@@ -68,10 +68,14 @@
     <div class="card-prices">
       <div class="price-current {{ 'on-target' if hit_target }}">
         {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.price) }}{% else %}—{% endif %}
+        {% if lp and w.passengers > 1 %}
+          <span class="per-person">${{ "%.2f"|format(lp.price / w.passengers) }}/person · {{ w.passengers }} pax total</span>
+        {% endif %}
       </div>
       <div class="price-target-label">
-        target
-        <strong>${{ "%.2f"|format(w.target_price) }}</strong>
+        target{{ ' / person' if w.passengers > 1 }}
+        <strong>${{ "%.2f"|format(w.target_price / w.passengers) }}</strong>
+        {% if w.passengers > 1 %}<span class="target-total">${{ "%.2f"|format(w.target_price) }} total</span>{% endif %}
       </div>
     </div>
 
@@ -149,8 +153,8 @@
         {% endif %}
         <div class="form-grid" style="margin-top:10px;">
           <div class="form-field">
-            <label>target price (USD)</label>
-            <input type="number" name="target_price" value="{{ w.target_price }}" min="1" step="0.01" required>
+            <label>target price (per person, USD)</label>
+            <input type="number" name="target_price" value="{{ "%.2f"|format(w.target_price / w.passengers) }}" min="1" step="0.01" required>
           </div>
           <div class="form-field">
             <label>passengers</label>
@@ -313,7 +317,7 @@
 
       <div class="form-grid">
         <div class="form-field">
-          <label for="f_target">target price (USD)</label>
+          <label for="f_target">target price (per person, USD)</label>
           <input type="number" id="f_target" name="target_price" min="1" step="0.01" placeholder="500.00" required>
         </div>
         <div class="form-field">
