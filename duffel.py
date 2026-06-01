@@ -19,22 +19,60 @@ def _headers():
     }
 
 
+def _extract_slice_stops(slice_data):
+    """Return (stops count, connection airports string) for a slice."""
+    segments = slice_data.get("segments", [])
+    stops = len(segments) - 1
+    if stops > 0:
+        # Connection airports are the destination of each segment except the last
+        connections = [seg["destination"]["iata_code"] for seg in segments[:-1]]
+        connection_str = ", ".join(connections)
+    else:
+        connection_str = ""
+    return stops, connection_str
+
+
+def _format_stops(stops, connection_airports):
+    """Return a human-readable stops string e.g. 'Direct' or '1 stop · IAD'."""
+    if stops == 0:
+        return "Direct"
+    if connection_airports:
+        return f"{stops} stop{'s' if stops > 1 else ''} · {connection_airports}"
+    return f"{stops} stop{'s' if stops > 1 else ''}"
+
+
 def _extract_flight_details(offer):
     """Pull the fields we care about from a Duffel offer object."""
     try:
-        segment = offer["slices"][0]["segments"][0]
+        outbound_slice = offer["slices"][0]
+        segment = outbound_slice["segments"][0]
         airline = offer["owner"]["name"]
         iata = offer["owner"]["iata_code"]
         flight_number = f"{iata} {segment['operating_carrier_flight_number']}"
-        departing_at = segment["departing_at"]   # e.g. "2026-06-12T09:45:00"
-        arriving_at = segment["arriving_at"]
+        departing_at = segment["departing_at"]
+        arriving_at = outbound_slice["segments"][-1]["arriving_at"]
         trip_type = "One-way" if len(offer["slices"]) == 1 else "Round-trip"
+
+        stops_outbound, connections_outbound = _extract_slice_stops(outbound_slice)
+
+        stops_inbound = None
+        connections_inbound = ""
+        if len(offer["slices"]) > 1:
+            stops_inbound, connections_inbound = _extract_slice_stops(offer["slices"][1])
+
+        # Combined connection airports string for storage
+        all_connections = ", ".join(filter(None, [connections_outbound, connections_inbound]))
+
         return {
             "airline": airline,
             "flight_number": flight_number,
             "departing_at": departing_at,
             "arriving_at": arriving_at,
             "trip_type": trip_type,
+            "stops_outbound": stops_outbound,
+            "stops_inbound": stops_inbound,
+            "connection_airports": all_connections or None,
+            "stops_label": _format_stops(stops_outbound, connections_outbound),
         }
     except (KeyError, IndexError):
         return None

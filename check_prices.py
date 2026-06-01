@@ -80,11 +80,16 @@ def check_all_watches():
         clear_error(watch["id"])
 
         # Save to price_history
-        supabase.table("price_history").insert({
+        history_row = {
             "watch_id": watch["id"],
             "price": price,
             "currency": currency,
-        }).execute()
+        }
+        if flight_details:
+            history_row["stops_outbound"] = flight_details.get("stops_outbound")
+            history_row["stops_inbound"] = flight_details.get("stops_inbound")
+            history_row["connection_airports"] = flight_details.get("connection_airports")
+        supabase.table("price_history").insert(history_row).execute()
 
         target = float(watch["target_price"])
         status = "TARGET MET ✓" if price <= target else "above target"

@@ -89,20 +89,25 @@ def _build_email_html(watch, price, flight_details):
     if flight_details:
         dep = _format_datetime(flight_details["departing_at"])
         arr = _format_datetime(flight_details["arriving_at"])
+        stops_label = flight_details.get("stops_label", "")
         flight_rows = f"""
     <tr style="background:#f5f5f5;">
       <td style="padding:10px 14px;font-weight:bold;">Flight</td>
       <td style="padding:10px 14px;">{flight_details['flight_number']} ({flight_details['airline']})</td>
     </tr>
     <tr>
+      <td style="padding:10px 14px;font-weight:bold;">Stops</td>
+      <td style="padding:10px 14px;">{stops_label}</td>
+    </tr>
+    <tr style="background:#f5f5f5;">
       <td style="padding:10px 14px;font-weight:bold;">Trip type</td>
       <td style="padding:10px 14px;">{flight_details['trip_type']}</td>
     </tr>
-    <tr style="background:#f5f5f5;">
+    <tr>
       <td style="padding:10px 14px;font-weight:bold;">Departs</td>
       <td style="padding:10px 14px;">{dep}</td>
     </tr>
-    <tr>
+    <tr style="background:#f5f5f5;">
       <td style="padding:10px 14px;font-weight:bold;">Arrives</td>
       <td style="padding:10px 14px;">{arr}</td>
     </tr>"""
@@ -197,8 +202,10 @@ def _build_email_text(watch, price, flight_details):
     if flight_details:
         dep = _format_datetime(flight_details["departing_at"])
         arr = _format_datetime(flight_details["arriving_at"])
+        stops_label = flight_details.get("stops_label", "")
         flight_lines = (
             f"Flight: {flight_details['flight_number']} ({flight_details['airline']})\n"
+            f"Stops: {stops_label}\n"
             f"Trip type: {flight_details['trip_type']}\n"
             f"Departs: {dep}\n"
             f"Arrives: {arr}\n"

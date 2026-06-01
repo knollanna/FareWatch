@@ -152,7 +152,16 @@
         <span>{{ w.date_from }} – {{ w.date_to }}</span>
         <span>{{ w.passengers }} passenger{{ 's' if w.passengers > 1 }}</span>
         <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
-        {% if lp %}<span>checked {{ lp.checked_at[:10] }}</span>{% endif %}
+        {% if lp %}
+          {% if lp.stops_outbound is not none %}
+            {% if lp.stops_outbound == 0 %}
+              <span>Direct</span>
+            {% else %}
+              <span>{{ lp.stops_outbound }} stop{{ 's' if lp.stops_outbound > 1 }}{% if lp.connection_airports %} · {{ lp.connection_airports }}{% endif %}</span>
+            {% endif %}
+          {% endif %}
+          <span>checked {{ lp.checked_at[:10] }}</span>
+        {% endif %}
       </div>
 
       <div class="client-prices">
