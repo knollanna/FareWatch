@@ -127,7 +127,7 @@ def check_all_watches():
 
                 # Email (failure here must not block Slack)
                 try:
-                    email_ok = send_alert(watch, price, flight_details)
+                    email_ok = send_alert(watch, price, flight_details, previous_lowest)
                     if email_ok:
                         print(f"  ✉️  Email sent to {watch['client_email']}")
                 except Exception as e:

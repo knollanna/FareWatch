@@ -58,7 +58,7 @@ def _format_datetime(dt_str):
         return dt_str
 
 
-def _build_email_html(watch, price, flight_details):
+def _build_email_html(watch, price, flight_details, previous_low=None):
     origin = watch["origin"]
     destination = watch["destination"]
     date_from = watch["date_from"]
@@ -75,6 +75,12 @@ def _build_email_html(watch, price, flight_details):
     else:
         price_note = ""
         target_note = ""
+
+    if previous_low is not None and price < float(previous_low):
+        drop_html = (f'<br><span style="font-weight:normal;font-size:12px;color:#2a7a2a;">'
+                     f'▼ down from {currency} {float(previous_low):.2f} (new low!)</span>')
+    else:
+        drop_html = ""
     exact_date = flight_details["departing_at"] if flight_details else None
     google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
 
@@ -167,7 +173,7 @@ def _build_email_html(watch, price, flight_details):
     </tr>{flight_rows}
     <tr>
       <td style="padding:10px 14px;font-weight:bold;">Current price</td>
-      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}{price_note}</td>
+      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}{price_note}{drop_html}</td>
     </tr>
     <tr style="background:#f5f5f5;">
       <td style="padding:10px 14px;font-weight:bold;">Your target</td>
@@ -191,7 +197,7 @@ def _build_email_html(watch, price, flight_details):
 """
 
 
-def _build_email_text(watch, price, flight_details):
+def _build_email_text(watch, price, flight_details, previous_low=None):
     origin = watch["origin"]
     destination = watch["destination"]
     date_from = watch["date_from"]
@@ -231,7 +237,7 @@ Great news — a fare has dropped to your target price for your trip!
 Route: {origin} → {destination}
 Travel window: {date_from} – {date_to}
 Passengers: {passengers}
-{flight_lines}Current price: {currency} {price:.2f}{f" total ({currency} {price / passengers:.2f} per person)" if passengers > 1 else ""}
+{flight_lines}Current price: {currency} {price:.2f}{f" total ({currency} {price / passengers:.2f} per person)" if passengers > 1 else ""}{f" — down from {currency} {float(previous_low):.2f} (new low!)" if (previous_low is not None and price < float(previous_low)) else ""}
 Your target: {currency} {target_price:.2f}{f" total ({currency} {target_price / passengers:.2f} per person)" if passengers > 1 else ""}
 
 {search_tip}
@@ -247,7 +253,7 @@ Anna
 """
 
 
-def send_alert(watch, price, flight_details=None):
+def send_alert(watch, price, flight_details=None, previous_low=None):
     """Send a fare alert email to the client (and a copy to SENDER_EMAIL)."""
     client_email = watch.get("client_email", "").strip()
     client_name = watch["client_name"]
@@ -255,8 +261,8 @@ def send_alert(watch, price, flight_details=None):
     destination = watch["destination"]
     subject = f"Fare alert: {origin} → {destination} — USD {price:.2f}"
 
-    html_body = _build_email_html(watch, price, flight_details)
-    text_body = _build_email_text(watch, price, flight_details)
+    html_body = _build_email_html(watch, price, flight_details, previous_low)
+    text_body = _build_email_text(watch, price, flight_details, previous_low)
 
     to_list = []
     if client_email and "@" in client_email and client_email != SENDER_EMAIL:
