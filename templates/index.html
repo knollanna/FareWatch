@@ -32,6 +32,14 @@
     </div>
 
     {% if hit_target and not w.booking_reference %}
+    {% if lp and lp.flight_number %}
+    <div class="book-flight-info">
+      <span class="bfi-label">search on Duffel:</span>
+      <span class="bfi-route">{{ w.origin }} → {{ w.destination }}</span>
+      · depart <strong>{{ lp.departing_at[:10] }}{% if lp.departing_at[11:16] %} at {{ lp.departing_at[11:16] }}{% endif %}</strong>
+      · {{ lp.flight_number }}{% if lp.airline %} ({{ lp.airline }}){% endif %}
+    </div>
+    {% endif %}
     <div class="card-book-actions">
       <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
       <button class="btn-book-secondary" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>

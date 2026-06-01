@@ -309,6 +309,18 @@ input, select { font-family: var(--font-sans); }
   cursor: pointer;
 }
 .btn-book-secondary:hover { background: var(--accent-light); }
+.book-flight-info {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--accent-light);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.book-flight-info .bfi-label { font-weight: 600; color: var(--accent); }
+.book-flight-info .bfi-route { font-family: var(--font-mono); color: var(--text); }
+.book-flight-info strong { color: var(--text); font-weight: 600; }
 
 /* ─── Add watch button + inline form ─────────────────────────────────────────── */
 .add-watch-btn {
