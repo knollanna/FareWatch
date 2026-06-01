@@ -101,6 +101,8 @@ def check_all_watches():
             history_row["airline"] = flight_details.get("airline")
             history_row["flight_number"] = flight_details.get("flight_number")
             history_row["departing_at"] = flight_details.get("departing_at")
+            history_row["returning_at"] = flight_details.get("returning_at")
+            history_row["return_flight_number"] = flight_details.get("return_flight_number")
         supabase.table("price_history").insert(history_row).execute()
 
         target = float(watch["target_price"])

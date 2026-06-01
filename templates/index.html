@@ -38,6 +38,12 @@
       <span class="bfi-route">{{ w.origin }} → {{ w.destination }}</span>
       · depart <strong>{{ lp.departing_at[:10] }}{% if lp.departing_at[11:16] %} at {{ lp.departing_at[11:16] }}{% endif %}</strong>
       · {{ lp.flight_number }}{% if lp.airline %} ({{ lp.airline }}){% endif %}
+      {% if w.trip_type == "round_trip" and lp.returning_at %}
+        <br>
+        <span class="bfi-route">{{ w.destination }} → {{ w.origin }}</span>
+        · return <strong>{{ lp.returning_at[:10] }}{% if lp.returning_at[11:16] %} at {{ lp.returning_at[11:16] }}{% endif %}</strong>
+        {% if lp.return_flight_number %} · {{ lp.return_flight_number }}{% endif %}
+      {% endif %}
     </div>
     {% endif %}
     <div class="card-book-actions">

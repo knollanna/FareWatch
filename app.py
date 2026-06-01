@@ -36,7 +36,7 @@ def _attach_watch_extras(watches):
     for watch in watches:
         latest = (
             supabase.table("price_history")
-            .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at")
+            .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at, returning_at, return_flight_number")
             .eq("watch_id", watch["id"])
             .order("checked_at", desc=True)
             .limit(1)
@@ -349,7 +349,7 @@ def client_page(token):
     for watch in watches:
         latest = (
             supabase.table("price_history")
-            .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at")
+            .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at, returning_at, return_flight_number")
             .eq("watch_id", watch["id"])
             .order("checked_at", desc=True)
             .limit(1)

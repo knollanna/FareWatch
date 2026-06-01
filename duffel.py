@@ -60,8 +60,16 @@ def _extract_flight_details(offer):
 
         stops_inbound = None
         connections_inbound = ""
+        returning_at = None
+        return_flight_number = None
         if len(offer["slices"]) > 1:
-            stops_inbound, connections_inbound = _extract_slice_stops(offer["slices"][1])
+            inbound_slice = offer["slices"][1]
+            stops_inbound, connections_inbound = _extract_slice_stops(inbound_slice)
+            rseg = inbound_slice["segments"][0]
+            returning_at = rseg.get("departing_at")
+            rfn = rseg.get("marketing_carrier_flight_number") or rseg.get("operating_carrier_flight_number")
+            rcarrier = (rseg.get("marketing_carrier") or {}).get("iata_code") or iata
+            return_flight_number = f"{rcarrier} {rfn}" if rfn else None
 
         # Combined connection airports string for storage
         all_connections = ", ".join(filter(None, [connections_outbound, connections_inbound]))
@@ -71,6 +79,8 @@ def _extract_flight_details(offer):
             "flight_number": flight_number,
             "departing_at": departing_at,
             "arriving_at": arriving_at,
+            "returning_at": returning_at,
+            "return_flight_number": return_flight_number,
             "trip_type": trip_type,
             "stops_outbound": stops_outbound,
             "stops_inbound": stops_inbound,
