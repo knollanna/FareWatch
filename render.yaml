@@ -28,12 +28,12 @@ services:
       - key: PYTHON_VERSION
         value: 3.13.0
 
-  # --- Price checker cron job (runs every 6 hours) ---
+  # --- Price checker cron job (every 2 hours, 24/7 for trend data) ---
   - type: cron
     name: farewatch-price-check
     runtime: python
     buildCommand: pip install -r requirements.txt
-    schedule: "0 9-23/2 * * *"
+    schedule: "0 */2 * * *"
     startCommand: python check_prices.py
     plan: free
     envVars:
