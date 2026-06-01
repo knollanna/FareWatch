@@ -21,6 +21,8 @@ services:
         sync: false
       - key: FLASK_SECRET_KEY
         sync: false
+      - key: BASE_URL
+        value: https://farewatch.annaknoll.com
       - key: PYTHON_VERSION
         value: 3.13.0
 

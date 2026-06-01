@@ -157,11 +157,29 @@ def index():
                            recent_alerts=recent_alerts)
 
 
+def _get_or_create_token(client_email):
+    """Return existing token for this client email, or generate a new one."""
+    import uuid
+    existing = (
+        supabase.table("watches")
+        .select("client_token")
+        .eq("client_email", client_email)
+        .not_.is_("client_token", "null")
+        .limit(1)
+        .execute()
+        .data
+    )
+    if existing and existing[0].get("client_token"):
+        return existing[0]["client_token"]
+    return str(uuid.uuid4())
+
+
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 def add_watch():
     if request.method == "POST":
         trip_type = request.form.get("trip_type", "one_way")
+        client_email = request.form["client_email"].strip()
         watch = {
             "origin": request.form["origin"].strip().upper(),
             "destination": request.form["destination"].strip().upper(),
@@ -173,7 +191,8 @@ def add_watch():
             "passengers": int(request.form["passengers"]),
             "target_price": float(request.form["target_price"]),
             "client_name": request.form["client_name"].strip(),
-            "client_email": request.form["client_email"].strip(),
+            "client_email": client_email,
+            "client_token": _get_or_create_token(client_email),
             "is_active": True,
             "is_paused": False,
         }
@@ -259,6 +278,43 @@ def watch_history(watch_id):
         .data
     )
     return jsonify(rows)
+
+
+@app.route("/client/<token>")
+def client_page(token):
+    watches = (
+        supabase.table("watches")
+        .select("*")
+        .eq("client_token", token)
+        .eq("is_active", True)
+        .eq("is_paused", False)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+    if not watches:
+        return render_template("client_not_found.html"), 404
+
+    # Attach latest price to each watch
+    for watch in watches:
+        latest = (
+            supabase.table("price_history")
+            .select("price, currency, checked_at")
+            .eq("watch_id", watch["id"])
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        watch["latest_price"] = latest[0] if latest else None
+
+    client_name = watches[0]["client_name"]
+    updated_at = datetime.datetime.now().strftime("%-d %B %Y at %-I:%M %p")
+    return render_template("client.html",
+                           watches=watches,
+                           client_name=client_name,
+                           token=token,
+                           updated_at=updated_at)
 
 
 @app.route("/usage")

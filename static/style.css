@@ -167,6 +167,14 @@ input, select { font-family: var(--font-sans); }
 .badge-alert   { background: #fff8e6; color: var(--amber); }
 .badge-error   { background: #fdecea; color: var(--red); cursor: help; }
 .badge-paused  { background: #f0f0f0; color: #999; }
+.copy-link-btn {
+  margin-left: 5px;
+  cursor: pointer;
+  opacity: 0.6;
+  font-size: 12px;
+  transition: opacity 0.15s;
+}
+.copy-link-btn:hover { opacity: 1; }
 
 /* route */
 .card-route {

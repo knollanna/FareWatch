@@ -8,6 +8,7 @@ load_dotenv()
 SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "")
+BASE_URL = os.environ.get("BASE_URL", "https://farewatch.annaknoll.com")
 
 
 def _google_flights_url(origin, destination, date_from, passengers, exact_date=None):
@@ -69,6 +70,19 @@ def _build_email_html(watch, price, flight_details):
     pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
     exact_date = flight_details["departing_at"] if flight_details else None
     google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+
+    client_token = watch.get("client_token")
+    if client_token:
+        client_url = f"{BASE_URL}/client/{client_token}"
+        client_page_section = f"""
+  <p style="margin:20px 0 8px;">
+    <a href="{client_url}"
+       style="background:#1D9E75;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
+      View your fare dashboard →
+    </a>
+  </p>"""
+    else:
+        client_page_section = ""
 
     # Flight details rows (only shown if we have them)
     flight_rows = ""
@@ -153,9 +167,12 @@ def _build_email_html(watch, price, flight_details):
 
   <p>Fares at this price can disappear quickly — <strong>reply to this email</strong> and I'll get your booking sorted right away.</p>
 
-  <p>Warm regards,<br>
-  <strong>Anna</strong><br>
-  <a href="mailto:{SENDER_EMAIL}">{SENDER_EMAIL}</a></p>
+  {client_page_section}
+
+  <p style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:13px;color:#888;">
+    Anna Knoll &nbsp;·&nbsp; Independent Travel Advisor &nbsp;·&nbsp; Fora Travel<br>
+    <a href="mailto:{SENDER_EMAIL}" style="color:#1D9E75;">{SENDER_EMAIL}</a>
+  </p>
 
 </body>
 </html>
@@ -173,6 +190,8 @@ def _build_email_text(watch, price, flight_details):
     currency = "USD"
     exact_date = flight_details["departing_at"] if flight_details else None
     google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+    client_token = watch.get("client_token")
+    client_url = f"{BASE_URL}/client/{client_token}" if client_token else None
 
     flight_lines = ""
     if flight_details:
@@ -204,6 +223,9 @@ Your target: {currency} {target_price:.2f}
 {search_tip}
 
 Fares at this price can disappear quickly — reply to this email and I'll get your booking sorted right away.
+{f"View your fare dashboard: {client_url}" if client_url else ""}
+
+Anna Knoll · Independent Travel Advisor · Fora Travel
 
 Warm regards,
 Anna

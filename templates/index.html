@@ -47,7 +47,12 @@
             <span class="badge badge-alert">alert sent today</span>
           {% endif %}
         </div>
-        <span class="badge badge-client">{{ w.client_name }}</span>
+        <span class="badge badge-client">
+          {{ w.client_name }}
+          {% if w.client_token %}
+            <span class="copy-link-btn" onclick="copyClientLink('{{ w.client_token }}', this)" title="Copy client link">⎘</span>
+          {% endif %}
+        </span>
       </div>
 
       <!-- booking actions (prominent, top of card) -->
@@ -369,6 +374,16 @@ function togglePaused(btn) {
 
 // If form was open before a flash (e.g. after redirect), keep it closed.
 // Auto-open if there's a validation error (future enhancement).
+
+function copyClientLink(token, el) {
+  const url = `https://farewatch.annaknoll.com/client/${token}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const orig = el.textContent;
+    el.textContent = 'copied!';
+    el.style.color = 'var(--accent)';
+    setTimeout(() => { el.textContent = orig; el.style.color = ''; }, 2000);
+  });
+}
 
 function toggleBook(watchId, btn) {
   const panel = document.getElementById('book-panel-' + watchId);
