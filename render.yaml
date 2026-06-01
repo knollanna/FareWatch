@@ -23,6 +23,8 @@ services:
         sync: false
       - key: BASE_URL
         value: https://farewatch.annaknoll.com
+      - key: RENDER_API_KEY
+        sync: false
       - key: PYTHON_VERSION
         value: 3.13.0
 
