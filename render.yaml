@@ -47,3 +47,7 @@ services:
         sync: false
       - key: SENDER_EMAIL
         sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: BASE_URL
+        value: https://farewatch.annaknoll.com

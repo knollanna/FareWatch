@@ -9,6 +9,7 @@ SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "")
 BASE_URL = os.environ.get("BASE_URL", "https://farewatch.annaknoll.com")
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 
 def _google_flights_url(origin, destination, date_from, passengers, exact_date=None):
@@ -291,13 +292,83 @@ def send_alert(watch, price, flight_details=None):
     try:
         response = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
         if response.status_code == 202:
-            print(f"  [alert] Email sent to {[t['email'] for t in to_list]}")
             return True
-        else:
-            print(f"  [alert] SendGrid error {response.status_code}: {response.text}")
-            return False
+        print(f"  [alert] SendGrid error {response.status_code}: {response.text}")
+        return False
     except requests.exceptions.RequestException as e:
         print(f"  [alert] Failed to send email: {e}")
+        return False
+
+
+def _fmt_short_date(d):
+    """'2026-07-12' -> 'Jul 12'."""
+    try:
+        from datetime import date
+        return date.fromisoformat(d).strftime("%b %-d")
+    except Exception:
+        return d
+
+
+def send_slack_alert(watch, price, stops=None, previous_low=None):
+    """
+    Post a Block Kit alert to the Slack incoming webhook.
+    Skips silently (returns False) if SLACK_WEBHOOK_URL is not configured.
+    `previous_low` adds a "down from $X" context line when this fare beats it.
+    """
+    if not SLACK_WEBHOOK_URL:
+        return False
+
+    origin = watch["origin"]
+    destination = watch["destination"]
+    passengers = watch["passengers"]
+    target = float(watch["target_price"])
+    client_name = watch.get("client_name") or "—"
+    date_from = watch["date_from"]
+    date_to = watch["date_to"]
+
+    below_target = price <= target
+    emoji = "🎯" if below_target else "📈"
+    headline = "Target hit" if below_target else "Price increase"
+
+    pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
+    dates = f"{_fmt_short_date(date_from)} – {_fmt_short_date(date_to)}"
+    google_url = _google_flights_url(origin, destination, date_from, passengers)
+
+    # Fare line, with "down from previous low" context when applicable
+    if previous_low is not None and price < float(previous_low):
+        fare_line = (f"*Fare:* ${price:,.0f} ⬇ down from ${float(previous_low):,.0f} "
+                     f"_(new low!)_ · target ${target:,.0f}")
+    else:
+        fare_line = f"*Fare:* ${price:,.0f} (target: ${target:,.0f})"
+
+    lines = [
+        f"{emoji} *{headline}: {origin} → {destination}*",
+        f"*Client:* {client_name}",
+        fare_line,
+        f"*Dates:* {dates} · {pax_label}",
+    ]
+    if stops:
+        lines.append(f"*Flight:* {stops}")
+
+    payload = {
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}},
+            {"type": "actions", "elements": [{
+                "type": "button",
+                "text": {"type": "plain_text", "text": "View on Google Flights →", "emoji": True},
+                "url": google_url,
+            }]},
+        ]
+    }
+
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        if r.status_code == 200:
+            return True
+        print(f"  [slack] error {r.status_code}: {r.text[:120]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [slack] failed to send: {e}")
         return False
 
 
