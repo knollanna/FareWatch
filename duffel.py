@@ -49,7 +49,9 @@ def _extract_flight_details(offer):
         segment = outbound_slice["segments"][0]
         airline = offer["owner"]["name"]
         iata = offer["owner"]["iata_code"]
-        flight_number = f"{iata} {segment['operating_carrier_flight_number']}"
+        # Prefer marketing flight number; fall back to operating; then just the code
+        fn = segment.get("marketing_carrier_flight_number") or segment.get("operating_carrier_flight_number")
+        flight_number = f"{iata} {fn}" if fn else iata
         departing_at = segment["departing_at"]
         arriving_at = outbound_slice["segments"][-1]["arriving_at"]
         trip_type = "One-way" if len(offer["slices"]) == 1 else "Round-trip"
@@ -154,7 +156,7 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
         }
     }
 
-    max_retries = 4
+    max_retries = 6
     for attempt in range(max_retries + 1):
         try:
             response = requests.post(
