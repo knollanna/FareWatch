@@ -3,7 +3,7 @@ import datetime
 from dotenv import load_dotenv
 from supabase import create_client
 from duffel import get_lowest_fare
-from alerts import send_alert
+from alerts import send_alert, send_error_alert
 
 load_dotenv()
 
@@ -71,9 +71,15 @@ def check_all_watches():
 
         if price is None:
             msg = f"No fares found for {route} ({watch['date_from']} – {watch['date_to']})"
-            print(f"  ⚠️  ERROR: {msg}\n")
+            print(f"  ⚠️  ERROR: {msg}")
+            # Only email if this is a new or changed error (avoid repeat spam)
+            if watch.get("last_error") != msg:
+                send_error_alert(watch, msg)
+            else:
+                print(f"  [error-alert] Same error as last check — not re-sending email.")
             set_error(watch["id"], msg)
             errors.append(f"{route}: {msg}")
+            print()
             continue
 
         # Successful check — clear any previous error

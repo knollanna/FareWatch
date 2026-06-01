@@ -293,3 +293,66 @@ def send_alert(watch, price, flight_details=None):
     except requests.exceptions.RequestException as e:
         print(f"  [alert] Failed to send email: {e}")
         return False
+
+
+def send_error_alert(watch, error_message):
+    """Notify Anna (SENDER_EMAIL only — never the client) when a watch errors."""
+    origin = watch["origin"]
+    destination = watch["destination"]
+    route = f"{origin} → {destination}"
+    client_name = watch.get("client_name", "—")
+    trip_type = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
+    subject = f"⚠ FareWatch error: {route}"
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:560px;margin:0 auto;padding:24px;">
+  <p style="font-size:16px;"><strong>⚠ A fare watch hit an error</strong></p>
+  <p>FareWatch couldn't complete a price check for the watch below. It's still active and will be retried on the next run.</p>
+
+  <table style="border-collapse:collapse;width:100%;margin:20px 0;">
+    <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:bold;">Route</td><td style="padding:10px 14px;">{route}</td></tr>
+    <tr><td style="padding:10px 14px;font-weight:bold;">Client</td><td style="padding:10px 14px;">{client_name}</td></tr>
+    <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:bold;">Travel window</td><td style="padding:10px 14px;">{watch['date_from']} – {watch['date_to']}</td></tr>
+    <tr><td style="padding:10px 14px;font-weight:bold;">Trip type</td><td style="padding:10px 14px;">{trip_type}</td></tr>
+    <tr style="background:#fdecea;"><td style="padding:10px 14px;font-weight:bold;color:#c0392b;">Error</td><td style="padding:10px 14px;color:#c0392b;">{error_message}</td></tr>
+  </table>
+
+  <p style="font-size:13px;color:#888;">Common causes: an invalid airport code, no flights available for the route/dates, or a temporary Duffel API issue.</p>
+  <p style="font-size:13px;color:#888;">FareWatch · automated system notification</p>
+</body>
+</html>
+"""
+    text_body = (
+        f"A fare watch hit an error.\n\n"
+        f"Route: {route}\nClient: {client_name}\n"
+        f"Travel window: {watch['date_from']} - {watch['date_to']}\n"
+        f"Trip type: {trip_type}\n\n"
+        f"Error: {error_message}\n\n"
+        f"The watch is still active and will be retried on the next run.\n"
+        f"FareWatch · automated system notification"
+    )
+
+    payload = {
+        "personalizations": [{"to": [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}], "subject": subject}],
+        "from": {"email": SENDER_EMAIL, "name": "FareWatch Alerts"},
+        "content": [
+            {"type": "text/plain", "value": text_body},
+            {"type": "text/html", "value": html_body},
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
+        if response.status_code == 202:
+            print(f"  [error-alert] Error email sent to {SENDER_EMAIL}")
+            return True
+        print(f"  [error-alert] SendGrid error {response.status_code}: {response.text}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [error-alert] Failed to send: {e}")
+        return False
