@@ -1,4 +1,5 @@
 import os
+import time
 import datetime
 import requests
 from dotenv import load_dotenv
@@ -83,14 +84,14 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
     """
     Search for flights across a date range.
     For round-trip, also loops over return dates to find the best combination.
-    Returns (price, currency, flight_details) or (None, None, None) if nothing found.
+    Returns (price, currency, flight_details, error) where error is None on
+    success/genuinely-no-flights, or a human-readable string on API failure.
     """
     try:
         start = datetime.date.fromisoformat(date_from)
         end = datetime.date.fromisoformat(date_to)
     except ValueError:
-        print(f"  [duffel] Invalid dates: {date_from} / {date_to}")
-        return None, None, None
+        return None, None, None, f"Invalid dates: {date_from} / {date_to}"
 
     # Build list of return dates for round-trip
     return_dates = []
@@ -103,36 +104,44 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
                 return_dates.append(str(r))
                 r += datetime.timedelta(days=1)
         except ValueError:
-            print(f"  [duffel] Invalid return dates: {return_date_from} / {return_date_to}")
+            return None, None, None, f"Invalid return dates: {return_date_from} / {return_date_to}"
 
     lowest_price = None
     lowest_currency = None
     lowest_details = None
+    last_error = None
 
     current = start
     while current <= end:
-        if trip_type == "round_trip" and return_dates:
-            for return_date in return_dates:
-                price, currency, details = _search_single_date(
-                    origin, destination, str(current), passengers, return_date=return_date
-                )
-                if price is not None and (lowest_price is None or price < lowest_price):
-                    lowest_price = price
-                    lowest_currency = currency
-                    lowest_details = details
-        else:
-            price, currency, details = _search_single_date(origin, destination, str(current), passengers)
+        targets = return_dates if (trip_type == "round_trip" and return_dates) else [None]
+        for return_date in targets:
+            price, currency, details, err = _search_single_date(
+                origin, destination, str(current), passengers, return_date=return_date
+            )
+            if err:
+                last_error = err
             if price is not None and (lowest_price is None or price < lowest_price):
                 lowest_price = price
                 lowest_currency = currency
                 lowest_details = details
+            # Gentle spacing between calls to stay under Duffel's rate limit
+            time.sleep(0.3)
         current += datetime.timedelta(days=1)
 
-    return lowest_price, lowest_currency, lowest_details
+    # If we found nothing AND hit an API error, surface the error.
+    # If we found nothing with no errors, that's a genuine "no flights".
+    if lowest_price is None:
+        return None, None, None, last_error
+
+    return lowest_price, lowest_currency, lowest_details, None
 
 
 def _search_single_date(origin, destination, departure_date, passengers, return_date=None):
-    """Search one specific date. Returns (price, currency, flight_details) or (None, None, None)."""
+    """
+    Search one specific date, retrying on rate limit.
+    Returns (price, currency, flight_details, error). error is None on success or
+    genuinely-no-offers; a string when the API call failed.
+    """
     slices = [{"origin": origin, "destination": destination, "departure_date": departure_date}]
     if return_date:
         slices.append({"origin": destination, "destination": origin, "departure_date": return_date})
@@ -145,30 +154,49 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
         }
     }
 
-    try:
-        response = requests.post(
-            f"{DUFFEL_API_BASE}/air/offer_requests?return_offers=true",
-            headers=_headers(),
-            json=payload,
-            timeout=30,
-        )
-    except requests.exceptions.Timeout:
-        print(f"  [duffel] Timeout searching {origin}→{destination} on {departure_date}")
-        return None, None, None
-    except requests.exceptions.RequestException as e:
-        print(f"  [duffel] Request error: {e}")
-        return None, None, None
+    max_retries = 4
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(
+                f"{DUFFEL_API_BASE}/air/offer_requests?return_offers=true",
+                headers=_headers(),
+                json=payload,
+                timeout=30,
+            )
+        except requests.exceptions.Timeout:
+            return None, None, None, "Duffel request timed out"
+        except requests.exceptions.RequestException as e:
+            return None, None, None, f"Network error reaching Duffel: {e}"
 
-    if response.status_code != 201:
-        errors = response.json().get("errors", [{}])
-        if errors:
-            print(f"  [duffel] API error on {departure_date}: {errors[0].get('message', response.status_code)}")
-        return None, None, None
+        # Rate limited — honor the reset header and retry
+        if response.status_code == 429:
+            reset = response.headers.get("ratelimit-reset", "1")
+            try:
+                wait = float(reset)
+            except (TypeError, ValueError):
+                wait = 1.0
+            wait = min(max(wait, 0.5), 30.0)  # clamp to a sane range
+            if attempt < max_retries:
+                print(f"  [duffel] Rate limited on {departure_date}, waiting {wait:.1f}s "
+                      f"(retry {attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+                continue
+            return None, None, None, "Duffel rate limit exceeded after retries"
 
-    offers = response.json().get("data", {}).get("offers", [])
-    if not offers:
-        return None, None, None
+        if response.status_code != 201:
+            try:
+                errors = response.json().get("errors", [{}])
+                msg = errors[0].get("message", f"HTTP {response.status_code}") if errors else f"HTTP {response.status_code}"
+            except Exception:
+                msg = f"HTTP {response.status_code}"
+            return None, None, None, f"Duffel API error: {msg}"
 
-    best = min(offers, key=lambda o: float(o["total_amount"]))
-    details = _extract_flight_details(best)
-    return float(best["total_amount"]), best["total_currency"], details
+        offers = response.json().get("data", {}).get("offers", [])
+        if not offers:
+            return None, None, None, None  # genuinely no flights for this date
+
+        best = min(offers, key=lambda o: float(o["total_amount"]))
+        details = _extract_flight_details(best)
+        return float(best["total_amount"]), best["total_currency"], details, None
+
+    return None, None, None, "Duffel rate limit exceeded after retries"

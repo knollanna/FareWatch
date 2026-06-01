@@ -58,7 +58,7 @@ def check_all_watches():
         trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
         print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
-        price, currency, flight_details = get_lowest_fare(
+        price, currency, flight_details, fetch_error = get_lowest_fare(
             origin=watch["origin"],
             destination=watch["destination"],
             date_from=watch["date_from"],
@@ -70,7 +70,10 @@ def check_all_watches():
         )
 
         if price is None:
-            msg = f"No fares found for {route} ({watch['date_from']} – {watch['date_to']})"
+            if fetch_error:
+                msg = f"{fetch_error} — {route} ({watch['date_from']} – {watch['date_to']})"
+            else:
+                msg = f"No fares found for {route} ({watch['date_from']} – {watch['date_to']})"
             print(f"  ⚠️  ERROR: {msg}")
             # Only email if this is a new or changed error (avoid repeat spam)
             if watch.get("last_error") != msg:
