@@ -29,7 +29,7 @@ services:
     name: farewatch-price-check
     runtime: python
     buildCommand: pip install -r requirements.txt
-    schedule: "0 */6 * * *"
+    schedule: "0 9-23/2 * * *"
     startCommand: python check_prices.py
     plan: free
     envVars:
