@@ -1,3 +1,23 @@
+"""
+FareWatch web application (Flask).
+
+This is the admin dashboard and the public client pages. It does NOT check
+prices itself — that's the job of the `check_prices.py` cron script. This file
+only reads/writes the Supabase database and renders pages.
+
+Routes fall into three groups:
+  * Admin (login-protected): the watch dashboard, add/edit/pause/resume/delete,
+    price history JSON, and the service-usage page.
+  * Public (no login): the per-client status page at /client/<token>, where the
+    token in the URL is the only access control.
+  * Auth: /login and /logout.
+
+Data lives in Supabase (Postgres). We talk to it through the `supabase` client
+using the anon key; the app gates access itself via a single shared password
+(APP_PASSWORD), so every table has an "allow all" RLS policy.
+
+Configuration comes entirely from environment variables (see .env.example).
+"""
 import os
 import datetime
 from functools import wraps
@@ -11,8 +31,13 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
+# Render (and most hosts) put the app behind a reverse proxy. ProxyFix makes
+# Flask trust the X-Forwarded-* headers so redirects/cookies use https + the
+# real host instead of the internal one.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+# Single shared Supabase client for the whole app (anon key; access is gated by
+# the app's own password login, not by Supabase auth).
 supabase: Client = create_client(
     os.environ["SUPABASE_URL"],
     os.environ["SUPABASE_ANON_KEY"],
@@ -22,6 +47,11 @@ APP_PASSWORD = os.environ["APP_PASSWORD"]
 
 
 def login_required(f):
+    """Decorator: redirect to /login unless the session is authenticated.
+
+    Used on every admin route. The public client page deliberately does NOT
+    use it (its access control is the unguessable token in the URL).
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("logged_in"):
@@ -140,6 +170,7 @@ def _get_recent_alerts():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """Show the login form (GET) and check the shared password (POST)."""
     if request.method == "POST":
         if request.form.get("password") == APP_PASSWORD:
             session["logged_in"] = True
@@ -150,6 +181,7 @@ def login():
 
 @app.route("/logout")
 def logout():
+    """Clear the session and return to the login page."""
     session.clear()
     return redirect(url_for("login"))
 
@@ -200,6 +232,7 @@ def _group_by_client(active_watches, paused_watches):
 @app.route("/")
 @login_required
 def index():
+    """Admin dashboard: metrics row, watches grouped by client, recent alerts."""
     active_watches = (
         supabase.table("watches")
         .select("*")
@@ -254,6 +287,9 @@ def _get_or_create_token(client_email, client_name=""):
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 def add_watch():
+    """Create a new flight watch. Target price is entered per-person and stored
+    as the total (per-person × passengers). Reuses the client's existing token
+    if one exists for that email, otherwise generates one."""
     if request.method == "POST":
         trip_type = request.form.get("trip_type", "one_way")
         client_email = request.form["client_email"].strip()
@@ -283,6 +319,8 @@ def add_watch():
 @app.route("/edit/<watch_id>", methods=["POST"])
 @login_required
 def edit_watch(watch_id):
+    """Update an existing watch from the inline edit form (per-person target →
+    stored total, same as add_watch)."""
     passengers = int(request.form["passengers"])
     updates = {
         "origin": request.form["origin"].strip().upper(),
@@ -305,6 +343,8 @@ def edit_watch(watch_id):
 @app.route("/book/<watch_id>", methods=["POST"])
 @login_required
 def book_watch(watch_id):
+    """Save a Duffel booking reference against a watch (manual entry after you
+    book on Duffel). Does not place the booking itself."""
     import datetime as dt
     booking_reference = request.form.get("booking_reference", "").strip()
     if booking_reference:
@@ -319,6 +359,7 @@ def book_watch(watch_id):
 @app.route("/pause/<watch_id>", methods=["POST"])
 @login_required
 def pause_watch(watch_id):
+    """Pause a watch (kept in the DB, but skipped by the price checker)."""
     supabase.table("watches").update({"is_active": False, "is_paused": True}).eq("id", watch_id).execute()
     flash("Watch paused.")
     return redirect(url_for("index"))
@@ -327,6 +368,7 @@ def pause_watch(watch_id):
 @app.route("/resume/<watch_id>", methods=["POST"])
 @login_required
 def resume_watch(watch_id):
+    """Reactivate a paused watch."""
     supabase.table("watches").update({"is_active": True, "is_paused": False}).eq("id", watch_id).execute()
     flash("Watch resumed.")
     return redirect(url_for("index"))
@@ -335,6 +377,7 @@ def resume_watch(watch_id):
 @app.route("/delete/<watch_id>", methods=["POST"])
 @login_required
 def delete_watch(watch_id):
+    """Permanently delete a watch. price_history and sent_alerts rows cascade."""
     supabase.table("watches").delete().eq("id", watch_id).execute()
     flash("Watch deleted.")
     return redirect(url_for("index"))
@@ -343,6 +386,7 @@ def delete_watch(watch_id):
 @app.route("/deactivate/<watch_id>", methods=["POST"])
 @login_required
 def deactivate_watch(watch_id):
+    """Legacy alias for pausing a watch (kept so old links/forms still work)."""
     supabase.table("watches").update({"is_active": False, "is_paused": True}).eq("id", watch_id).execute()
     flash("Watch paused.")
     return redirect(url_for("index"))
@@ -351,6 +395,8 @@ def deactivate_watch(watch_id):
 @app.route("/history/<watch_id>")
 @login_required
 def watch_history(watch_id):
+    """Return this watch's full price history as JSON (oldest→newest) for the
+    inline Chart.js price chart."""
     rows = (
         supabase.table("price_history")
         .select("price, currency, checked_at")
@@ -364,6 +410,9 @@ def watch_history(watch_id):
 
 @app.route("/client/<token>")
 def client_page(token):
+    """Public, read-only status page for one client. No login — the token in
+    the URL is the access control. Shows only that client's active watches.
+    Returns a 404 page if the token matches nothing."""
     watches = (
         supabase.table("watches")
         .select("*")
@@ -404,10 +453,13 @@ def client_page(token):
 @app.route("/usage")
 @login_required
 def usage():
+    """Service-usage dashboard: live consumption/limits for SendGrid, Duffel,
+    Supabase, and Render (see usage.py)."""
     from usage import get_all_usage
     data = get_all_usage()
     return render_template("usage.html", usage=data)
 
 
 if __name__ == "__main__":
+    # Local dev server only. In production, gunicorn runs `app:app` (see Procfile).
     app.run(debug=False)

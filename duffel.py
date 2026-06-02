@@ -1,3 +1,22 @@
+"""
+Duffel flights integration — all flight-fare lookups go through here.
+
+The one function the rest of the app uses is `get_lowest_fare(...)`. Given a
+route, a departure-date window (and optionally a return window for round-trips),
+and a passenger count, it searches Duffel and returns the cheapest fare it can
+find plus the winning flight's details (airline, flight number, times, stops).
+
+Implementation notes:
+  * Duffel searches one specific departure date at a time, so we loop over every
+    date in the window (and every outbound×return combination for round-trips)
+    and keep the cheapest result.
+  * Duffel rate-limits bursts of requests. We space calls out and retry on
+    HTTP 429, honouring Duffel's `ratelimit-reset` header.
+  * `total_amount` from Duffel is the price for ALL passengers; the caller treats
+    every price as a total.
+
+This module is flights-only. Hotels live in `duffel_stays.py` (separate file).
+"""
 import os
 import time
 import datetime
@@ -12,6 +31,7 @@ DUFFEL_API_VERSION = "v2"
 
 
 def _headers():
+    """Standard auth + version headers for every Duffel API request."""
     return {
         "Authorization": f"Bearer {DUFFEL_API_TOKEN}",
         "Duffel-Version": DUFFEL_API_VERSION,

@@ -1,3 +1,18 @@
+"""
+Service-usage data for the /usage admin page.
+
+Each `get_*_usage()` function calls one external service's API and returns a
+small dict of metrics + a status colour (green/amber/red) for that card:
+
+  * SendGrid — emails sent today / this month vs the 100/day free limit.
+  * Duffel   — whether the API token is working, and balance if exposed.
+  * Supabase — row counts per table (size vs the 500 MB free tier).
+  * Render   — static free-tier reminders, plus live service status + last
+               deploy if a RENDER_API_KEY is configured.
+
+Everything is best-effort with a short timeout: any failing call returns
+"unavailable" rather than raising, so a slow/down service never breaks the page.
+"""
 import os
 import datetime
 import requests

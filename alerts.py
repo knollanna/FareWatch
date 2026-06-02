@@ -1,3 +1,20 @@
+"""
+Notifications — how FareWatch tells you (and clients) about fares.
+
+Three public functions, all called from check_prices.py:
+  * send_alert(...)        — the client-facing fare-drop EMAIL (via SendGrid).
+                             Goes to the client and copies you (SENDER_EMAIL).
+  * send_slack_alert(...)  — a Slack Block Kit message to your alerts channel
+                             (via SLACK_WEBHOOK_URL). Skips silently if unset.
+  * send_error_alert(...)  — an internal email to you only, when a watch errors.
+
+Helpers build the email HTML/text and the Slack blocks. Everything degrades
+gracefully: a missing key or a failed request returns False instead of raising,
+so one channel breaking never blocks the others.
+
+Note on pricing: prices passed in are TOTALS (all passengers). For multi-guest
+watches the messages also show the per-person figure for clarity.
+"""
 import os
 import urllib.parse
 import requests
@@ -8,7 +25,9 @@ load_dotenv()
 SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "")
+# Base URL of the deployed app, used to build client-dashboard links in emails.
 BASE_URL = os.environ.get("BASE_URL", "https://farewatch.annaknoll.com")
+# Slack incoming webhook; if empty, Slack notifications are skipped silently.
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 

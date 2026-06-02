@@ -1,3 +1,23 @@
+"""
+Price-checking cron job — the heart of FareWatch's automation.
+
+Run on a schedule by Render's cron service (every 2 hours), and runnable by hand
+with `python check_prices.py`. For every active, non-paused watch it:
+
+  1. Asks Duffel for the lowest current fare (duffel.get_lowest_fare).
+  2. Saves that price (+ flight details) to the price_history table — this runs
+     on EVERY check, which is what builds the long-term price trend data.
+  3. Decides whether to alert. An alert fires only when the fare is at/below the
+     target AND is a new all-time low for that watch (so you're not spammed with
+     repeat notifications for the same price).
+  4. Sends email (SendGrid) and Slack notifications, independently, and records
+     the alert in sent_alerts.
+  5. On a Duffel failure, stores the reason in watches.last_error and emails a
+     one-off error notice (deduped so the same error doesn't email repeatedly).
+
+This script never serves web traffic; app.py never checks prices. They share
+only the Supabase database.
+"""
 import os
 import datetime
 from dotenv import load_dotenv
@@ -29,14 +49,21 @@ def get_previous_lowest(watch_id):
 
 
 def set_error(watch_id, message):
+    """Store a human-readable failure reason on the watch (shown in the UI)."""
     supabase.table("watches").update({"last_error": message}).eq("id", watch_id).execute()
 
 
 def clear_error(watch_id):
+    """Clear a watch's stored error after a successful check."""
     supabase.table("watches").update({"last_error": None}).eq("id", watch_id).execute()
 
 
 def check_all_watches():
+    """Check every active watch once: fetch fare, store it, alert if warranted.
+
+    See the module docstring for the full flow. Prints a per-watch summary and a
+    final error roll-up to the console (visible in the Render cron logs).
+    """
     watches = (
         supabase.table("watches")
         .select("*")
