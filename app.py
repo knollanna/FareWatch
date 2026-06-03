@@ -398,7 +398,7 @@ def watch_history(watch_id):
     inline Chart.js price chart."""
     rows = (
         supabase.table("price_history")
-        .select("price, currency, checked_at")
+        .select("price, currency, checked_at, stops_outbound, stops_inbound")
         .eq("watch_id", watch_id)
         .order("checked_at", desc=False)
         .execute()

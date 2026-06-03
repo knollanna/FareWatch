@@ -194,7 +194,7 @@
       {% endif %}
 
       <!-- price history -->
-      <button class="client-history-toggle" onclick="toggleClientHistory('{{ w.id }}', this)">
+      <button class="client-history-toggle" onclick="toggleClientHistory('{{ w.id }}', this, {{ w.passengers }})">
         show price history
       </button>
       <div id="client-history-{{ w.id }}" style="display:none">
@@ -221,7 +221,19 @@
 <script>
 const clientCharts = {};
 
-async function toggleClientHistory(watchId, btn) {
+function _stopColor(s) {
+  if (s === null || s === undefined) return '#cccccc';
+  if (s === 0) return '#1D9E75';
+  if (s === 1) return '#e8a020';
+  return '#e05252';
+}
+function _stopLabel(s) {
+  if (s === null || s === undefined) return '';
+  if (s === 0) return 'nonstop';
+  return s + ' stop' + (s > 1 ? 's' : '');
+}
+
+async function toggleClientHistory(watchId, btn, passengers) {
   const wrap = document.getElementById('client-history-' + watchId);
   const panel = document.getElementById('client-history-panel-' + watchId);
   const open = wrap.style.display === 'none';
@@ -237,17 +249,26 @@ async function toggleClientHistory(watchId, btn) {
     return;
   }
 
-  const prices = data.map(d => parseFloat(d.price));
+  const pax = passengers || 1;
+  const perPerson = pax > 1;
+  const prices = data.map(d => parseFloat(d.price) / pax);
   const labels = data.map(d => d.checked_at.slice(0, 10));
-  const min = Math.min(...prices).toFixed(2);
-  const max = Math.max(...prices).toFixed(2);
-  const current = prices[prices.length - 1].toFixed(2);
+  const stops = data.map(d => d.stops_outbound == null ? null : (d.stops_outbound + (d.stops_inbound || 0)));
+  const min = Math.min(...prices).toFixed(0);
+  const max = Math.max(...prices).toFixed(0);
+  const current = prices[prices.length - 1].toFixed(0);
 
   panel.innerHTML = `
-    <div style="display:flex;gap:20px;margin:12px 0;">
+    <div style="display:flex;gap:20px;margin:12px 0 6px;">
       <div style="font-size:12px;color:var(--muted)">current<strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:17px">$${current}</strong></div>
       <div style="font-size:12px;color:var(--muted)">lowest seen<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:17px">$${min}</strong></div>
       <div style="font-size:12px;color:var(--muted)">highest seen<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:17px">$${max}</strong></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">
+      ${perPerson ? 'per person · ' : ''}point colour = stops:
+      <span style="color:#1D9E75">● nonstop</span>
+      <span style="color:#e8a020">● 1 stop</span>
+      <span style="color:#e05252">● 2+</span>
     </div>
     <div style="position:relative;height:160px;">
       <canvas id="client-chart-${watchId}"></canvas>
@@ -260,10 +281,12 @@ async function toggleClientHistory(watchId, btn) {
       labels,
       datasets: [{
         data: prices,
-        borderColor: '#1D9E75',
-        backgroundColor: 'rgba(29,158,117,0.08)',
-        pointRadius: 4,
-        pointBackgroundColor: '#1D9E75',
+        borderColor: '#cfcfcf',
+        backgroundColor: 'rgba(0,0,0,0.03)',
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        pointBackgroundColor: stops.map(_stopColor),
+        pointBorderColor: stops.map(_stopColor),
         tension: 0.3,
         fill: true,
         borderWidth: 2,
@@ -272,7 +295,15 @@ async function toggleClientHistory(watchId, btn) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: (c) => {
+            const sl = _stopLabel(stops[c.dataIndex]);
+            return '$' + c.parsed.y.toFixed(0) + (perPerson ? '/person' : '') + (sl ? ' · ' + sl : '');
+          }
+        }}
+      },
       scales: {
         y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
         x: { ticks: { font: { size: 11 } } }

@@ -107,7 +107,7 @@
     {% endif %}
 
     <div class="card-actions">
-      <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this)">history</button>
+      <button class="btn-sm accent" onclick="toggleHistory('{{ w.id }}', this, {{ w.passengers }})">history</button>
       <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
       <form method="POST" action="/pause/{{ w.id }}">
         <button class="btn-sm" type="submit">⏸ pause</button>
@@ -543,7 +543,85 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ─── Price history chart ───
 const charts = {};
-async function toggleHistory(watchId, btn) {
+// Colour/label a point by the number of stops on the cheapest fare that check.
+function _stopColor(s) {
+  if (s === null || s === undefined) return '#cccccc';   // unknown (old rows)
+  if (s === 0) return '#1D9E75';                          // nonstop
+  if (s === 1) return '#e8a020';                          // 1 stop
+  return '#e05252';                                       // 2+ stops
+}
+function _stopLabel(s) {
+  if (s === null || s === undefined) return '';
+  if (s === 0) return 'nonstop';
+  return s + ' stop' + (s > 1 ? 's' : '');
+}
+
+// Build the price-history chart. `prices` are per-person when pax > 1, and each
+// point is coloured by the stops of that check's cheapest fare.
+function buildHistoryChart(panel, watchId, data, pax) {
+  const prices = data.map(d => parseFloat(d.price) / pax);
+  const labels = data.map(d => d.checked_at.slice(0, 10));
+  const stops = data.map(d => d.stops_outbound == null ? null : (d.stops_outbound + (d.stops_inbound || 0)));
+  const min = Math.min(...prices).toFixed(0);
+  const max = Math.max(...prices).toFixed(0);
+  const current = prices[prices.length - 1].toFixed(0);
+  const perPerson = pax > 1;
+
+  panel.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:6px;">
+      <div style="font-size:12px;color:var(--muted)">current <strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:16px">$${current}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">lowest <strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">highest <strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">
+      ${perPerson ? 'per person · ' : ''}point colour = stops:
+      <span style="color:#1D9E75">● nonstop</span>
+      <span style="color:#e8a020">● 1 stop</span>
+      <span style="color:#e05252">● 2+</span>
+    </div>
+    <div style="position:relative;height:160px;">
+      <canvas id="chart-${watchId}"></canvas>
+    </div>`;
+
+  const ctx = document.getElementById('chart-' + watchId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: prices,
+        borderColor: '#cfcfcf',
+        backgroundColor: 'rgba(0,0,0,0.03)',
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        pointBackgroundColor: stops.map(_stopColor),
+        pointBorderColor: stops.map(_stopColor),
+        tension: 0.3,
+        fill: true,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: (c) => {
+            const sl = _stopLabel(stops[c.dataIndex]);
+            return '$' + c.parsed.y.toFixed(0) + (perPerson ? '/person' : '') + (sl ? ' · ' + sl : '');
+          }
+        }}
+      },
+      scales: {
+        y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+async function toggleHistory(watchId, btn, passengers) {
   const panel = document.getElementById('history-panel-' + watchId);
   const open = panel.style.display === 'none';
   panel.style.display = open ? '' : 'none';
@@ -557,49 +635,7 @@ async function toggleHistory(watchId, btn) {
     panel.innerHTML = '<em style="font-size:13px;color:var(--muted)">Not enough data yet — check back after the next price check.</em>';
     return;
   }
-
-  const prices = data.map(d => parseFloat(d.price));
-  const labels = data.map(d => d.checked_at.slice(0, 10));
-  const min = Math.min(...prices).toFixed(2);
-  const max = Math.max(...prices).toFixed(2);
-  const current = prices[prices.length - 1].toFixed(2);
-
-  panel.innerHTML = `
-    <div style="display:flex;gap:16px;margin-bottom:12px;">
-      <div style="font-size:12px;color:var(--muted)">current <strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:16px">$${current}</strong></div>
-      <div style="font-size:12px;color:var(--muted)">lowest <strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
-      <div style="font-size:12px;color:var(--muted)">highest <strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
-    </div>
-    <div style="position:relative;height:160px;">
-      <canvas id="chart-${watchId}"></canvas>
-    </div>`;
-
-  const ctx = document.getElementById('chart-' + watchId).getContext('2d');
-  charts[watchId] = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data: prices,
-        borderColor: '#1D9E75',
-        backgroundColor: 'rgba(29,158,117,0.08)',
-        pointRadius: 4,
-        pointBackgroundColor: '#1D9E75',
-        tension: 0.3,
-        fill: true,
-        borderWidth: 2,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
-        x: { ticks: { font: { size: 11 } } }
-      }
-    }
-  });
+  charts[watchId] = buildHistoryChart(panel, watchId, data, passengers || 1);
 }
 </script>
 
