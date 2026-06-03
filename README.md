@@ -91,8 +91,10 @@ FareWatch is two programs that share one database — they never call each other
   numbers, departure/return times, stops, connections). Also records the
   cheapest fare at each **stop level** that check (`price_nonstop`,
   `price_1_stop`, `price_2_plus_stops`) — so a nonstop priced just above the
-  cheapest connecting fare is no longer thrown away. This is the dataset behind
-  the price charts and any future trend / stop-quality analysis.
+  cheapest connecting fare is no longer thrown away — plus `stop_tier_details`
+  (JSON: the winning fare's airline / flight numbers / dates / stops at each
+  tier, for the expandable fare-options table on each card). This is the dataset
+  behind the price charts and any future trend / stop-quality analysis.
 - **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric and
   the once-per-new-low gating). Has a nullable `hotel_watch_id` for later.
 - **`hotel_watches`**, **`hotel_price_history`** — built for hotel monitoring

@@ -72,9 +72,10 @@ heads-up email so nothing fails silently.
 - Captures the winning flight's airline, flight numbers, departure/return times,
   and number of stops with connecting airports.
 - Records the cheapest fare at each **stop level** (nonstop / 1-stop / 2+) and
-  shows them on each card, so you can see the trade-off between price and stops
-  at a glance — a nonstop a few dollars more than the cheapest connection is no
-  longer hidden.
+  shows them on each card as an **expandable fare-options table**: per-person
+  prices side by side, and each row opens to reveal that fare's airline, flight
+  number(s), dates, and connections (both legs for round-trips). A nonstop a few
+  dollars more than the cheapest connection is no longer hidden.
 
 **Smart alerts**
 - Email (to the client, copying the advisor) **and** Slack, fired together.
@@ -85,7 +86,10 @@ heads-up email so nothing fails silently.
 
 **Client experience**
 - A private, link-only status page per client (no login required).
-- Live current price vs target, a progress bar, and a price-history chart.
+- Live current price vs target, a progress bar, and a price-history chart whose
+  points are colour-coded by stops (so you can see when the cheapest fare was a
+  nonstop vs a connection). Prices are shown per-person for multi-passenger
+  trips throughout.
 - Clear states: "🎯 Target reached", "⏸ Paused" (if a watch is temporarily
   paused by the advisor), auto-refreshing, professionally branded.
 
