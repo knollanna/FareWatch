@@ -9,10 +9,10 @@
       {% if detail %}
         {% if detail.airline %}<div class="td-airline">{{ detail.airline }}</div>{% endif %}
         {% if detail.returning_at %}
-          <div>out {{ detail.flight_number }} · {{ detail.departing_at[:10] }}{% if detail.departing_at[11:16] %} at {{ detail.departing_at[11:16] }}{% endif %}</div>
-          <div>return {{ detail.return_flight_number }} · {{ detail.returning_at[:10] }}{% if detail.returning_at[11:16] %} at {{ detail.returning_at[11:16] }}{% endif %}</div>
+          <div>out {{ detail.flight_number }} · {{ detail.departing_at|fmtdt }}</div>
+          <div>return {{ detail.return_flight_number }} · {{ detail.returning_at|fmtdt }}</div>
         {% elif detail.departing_at %}
-          <div>{{ detail.flight_number }} · depart {{ detail.departing_at[:10] }}{% if detail.departing_at[11:16] %} at {{ detail.departing_at[11:16] }}{% endif %}</div>
+          <div>{{ detail.flight_number }} · depart {{ detail.departing_at|fmtdt }}</div>
         {% endif %}
         {% set tot = (detail.stops_outbound or 0) + (detail.stops_inbound or 0) %}
         <div class="td-stops">{{ 'nonstop' if tot == 0 else (tot ~ ' stop' ~ ('s' if tot > 1 else '')) }}{% if detail.connection_airports %} · via {{ detail.connection_airports }}{% endif %}</div>

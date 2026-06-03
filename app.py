@@ -60,6 +60,21 @@ def login_required(f):
     return decorated
 
 
+@app.template_filter("fmtdt")
+def fmtdt(iso):
+    """Format an ISO datetime string compactly: 'Aug 1, 9am' / 'Aug 31, 5:45pm'."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return iso
+    hour12 = dt.hour % 12 or 12
+    ampm = "am" if dt.hour < 12 else "pm"
+    time_str = f"{hour12}:{dt.minute:02d}{ampm}" if dt.minute else f"{hour12}{ampm}"
+    return f"{dt.strftime('%b')} {dt.day}, {time_str}"
+
+
 def _stops_text(lp, trip_type):
     """Human-readable stops summary, splitting connections per leg.
 
