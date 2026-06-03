@@ -224,6 +224,24 @@ input, select { font-family: var(--font-sans); }
   color: var(--muted);
   font-family: var(--font-mono);
 }
+
+/* Cheapest fare at each stop level (nonstop / 1-stop / 2+) */
+.stop-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.stop-tiers span::before {
+  content: '·';
+  margin-right: 10px;
+  color: var(--border);
+}
+.stop-tiers span:first-child::before { content: ''; margin-right: 0; }
+.stop-tiers .tier-best { color: var(--accent); font-weight: 500; }
 .price-target-label {
   font-size: 12px;
   color: var(--muted);

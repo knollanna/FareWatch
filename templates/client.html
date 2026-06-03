@@ -143,7 +143,9 @@
         <div class="client-route">
           {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
         </div>
-        {% if hit_target %}
+        {% if w.is_paused %}
+          <div class="target-banner" style="background:#f5f5f5;color:var(--muted);">⏸ Paused</div>
+        {% elif hit_target %}
           <div class="target-banner">🎯 Target reached!</div>
         {% endif %}
       </div>
@@ -178,6 +180,17 @@
         <div class="progress-fill {{ 'on-target' if hit_target }}"
              style="width: {{ progress }}%"></div>
       </div>
+
+      {% if lp %}
+        {% set tiers_present = [lp.price_nonstop, lp.price_1_stop, lp.price_2_plus_stops]|select|list %}
+        {% if tiers_present|length >= 2 %}
+        <div class="stop-tiers" style="margin-top:6px;">
+          {% if lp.price_nonstop %}<span class="{{ 'tier-best' if lp.price_nonstop == lp.price }}">nonstop&nbsp;${{ "%.0f"|format(lp.price_nonstop) }}</span>{% endif %}
+          {% if lp.price_1_stop %}<span class="{{ 'tier-best' if lp.price_1_stop == lp.price }}">1&nbsp;stop&nbsp;${{ "%.0f"|format(lp.price_1_stop) }}</span>{% endif %}
+          {% if lp.price_2_plus_stops %}<span class="{{ 'tier-best' if lp.price_2_plus_stops == lp.price }}">2+&nbsp;stops&nbsp;${{ "%.0f"|format(lp.price_2_plus_stops) }}</span>{% endif %}
+        </div>
+        {% endif %}
+      {% endif %}
 
       <!-- price history -->
       <button class="client-history-toggle" onclick="toggleClientHistory('{{ w.id }}', this)">
