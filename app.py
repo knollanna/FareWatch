@@ -236,14 +236,12 @@ def _group_by_client(active_watches, paused_watches):
             g["name"] = key
             g["email"] = sample.get("client_email", "")
 
-    # Order groups by their soonest upcoming travel date (active first, then
-    # paused), so the client with the nearest trip shows first. Watches inside
-    # each group are already date-sorted (the queries order by date_from).
-    def earliest_date(g):
-        dates = [w["date_from"] for w in (g["active"] + g["paused"]) if w.get("date_from")]
-        return min(dates) if dates else "9999-12-31"
-
-    return sorted(groups.values(), key=earliest_date)
+    # Group order: My Watches first, then clients alphabetically. Watches inside
+    # each group are already soonest-first (the queries order by date_from).
+    return sorted(
+        groups.values(),
+        key=lambda g: (0 if g["key"] == "__mine__" else 1, g["name"].lower())
+    )
 
 
 @app.route("/")
