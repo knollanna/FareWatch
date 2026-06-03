@@ -242,6 +242,7 @@ input, select { font-family: var(--font-sans); }
 }
 .stop-tiers span:first-child::before { content: ''; margin-right: 0; }
 .stop-tiers .tier-best { color: var(--accent); font-weight: 500; }
+.stop-tiers .tier-label { font-family: var(--font-sans); color: #aaa; }
 .price-target-label {
   font-size: 12px;
   color: var(--muted);

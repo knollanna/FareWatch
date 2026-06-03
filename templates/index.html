@@ -91,14 +91,17 @@
       <div class="progress-fill {{ 'on-target' if hit_target }}" style="width: {{ progress }}%"></div>
     </div>
 
-    <!-- cheapest fare at each stop level (only shown when ≥2 levels available) -->
+    <!-- cheapest fare at each stop level (only shown when ≥2 levels available).
+         Shown per-person when pax>1 so it lines up with the per-person target.
+         Highlight compares stored totals; dividing both by pax keeps the match. -->
     {% if lp %}
       {% set tiers_present = [lp.price_nonstop, lp.price_1_stop, lp.price_2_plus_stops]|select|list %}
       {% if tiers_present|length >= 2 %}
       <div class="stop-tiers">
-        {% if lp.price_nonstop %}<span class="{{ 'tier-best' if lp.price_nonstop == lp.price }}">nonstop&nbsp;${{ "%.0f"|format(lp.price_nonstop) }}</span>{% endif %}
-        {% if lp.price_1_stop %}<span class="{{ 'tier-best' if lp.price_1_stop == lp.price }}">1&nbsp;stop&nbsp;${{ "%.0f"|format(lp.price_1_stop) }}</span>{% endif %}
-        {% if lp.price_2_plus_stops %}<span class="{{ 'tier-best' if lp.price_2_plus_stops == lp.price }}">2+&nbsp;stops&nbsp;${{ "%.0f"|format(lp.price_2_plus_stops) }}</span>{% endif %}
+        {% if w.passengers > 1 %}<span class="tier-label">per person</span>{% endif %}
+        {% if lp.price_nonstop %}<span class="{{ 'tier-best' if lp.price_nonstop == lp.price }}">nonstop&nbsp;${{ "{:,.0f}".format(lp.price_nonstop / w.passengers) }}</span>{% endif %}
+        {% if lp.price_1_stop %}<span class="{{ 'tier-best' if lp.price_1_stop == lp.price }}">1&nbsp;stop&nbsp;${{ "{:,.0f}".format(lp.price_1_stop / w.passengers) }}</span>{% endif %}
+        {% if lp.price_2_plus_stops %}<span class="{{ 'tier-best' if lp.price_2_plus_stops == lp.price }}">2+&nbsp;stops&nbsp;${{ "{:,.0f}".format(lp.price_2_plus_stops / w.passengers) }}</span>{% endif %}
       </div>
       {% endif %}
     {% endif %}
