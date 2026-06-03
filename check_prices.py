@@ -85,7 +85,7 @@ def check_all_watches():
         trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
         print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
-        price, currency, flight_details, fetch_error = get_lowest_fare(
+        price, currency, flight_details, fetch_error, stop_tiers = get_lowest_fare(
             origin=watch["origin"],
             destination=watch["destination"],
             date_from=watch["date_from"],
@@ -125,6 +125,10 @@ def check_all_watches():
             "watch_id": watch["id"],
             "price": price,
             "currency": currency,
+            # Cheapest fare at each stop level this check (any may be None)
+            "price_nonstop": stop_tiers.get("price_nonstop"),
+            "price_1_stop": stop_tiers.get("price_1_stop"),
+            "price_2_plus_stops": stop_tiers.get("price_2_plus_stops"),
         }
         if flight_details:
             history_row["stops_outbound"] = flight_details.get("stops_outbound")
@@ -154,7 +158,7 @@ def check_all_watches():
 
                 # Email (failure here must not block Slack)
                 try:
-                    email_ok = send_alert(watch, price, flight_details, previous_lowest)
+                    email_ok = send_alert(watch, price, flight_details, previous_lowest, currency)
                     if email_ok:
                         print(f"  ✉️  Email sent to {watch['client_email']}")
                 except Exception as e:
