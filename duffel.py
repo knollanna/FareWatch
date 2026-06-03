@@ -129,12 +129,16 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
     Returns (price, currency, flight_details, error, stop_tiers):
       * price/currency/flight_details — the overall cheapest fare (unchanged).
       * error — None on success/genuinely-no-flights, or a message on API failure.
-      * stop_tiers — dict with the cheapest TOTAL fare at each stop level found
-        anywhere in the window: {"price_nonstop", "price_1_stop",
-        "price_2_plus_stops"}, each a float or None. This is what lets us treat
-        "same price, fewer stops" as a better deal later.
+      * stop_tiers — the cheapest fare at each stop level found anywhere in the
+        window: flat prices ("price_nonstop", "price_1_stop", "price_2_plus_stops",
+        each float or None) plus "details" — a dict keyed "nonstop"/"1_stop"/
+        "2_plus" with that tier's winning flight details (airline, flight numbers,
+        dates, stops, connections) or None.
     """
-    empty_tiers = {"price_nonstop": None, "price_1_stop": None, "price_2_plus_stops": None}
+    empty_tiers = {
+        "price_nonstop": None, "price_1_stop": None, "price_2_plus_stops": None,
+        "details": {"nonstop": None, "1_stop": None, "2_plus": None},
+    }
     try:
         start = datetime.date.fromisoformat(date_from)
         end = datetime.date.fromisoformat(date_to)
@@ -174,17 +178,39 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
                 lowest_currency = currency
                 lowest_details = details
             # Merge this date's per-tier cheapest into the running aggregate
-            for bucket, amt in (date_tiers or {}).items():
-                if bucket not in agg_tiers or amt < agg_tiers[bucket]:
-                    agg_tiers[bucket] = amt
+            for bucket, entry in (date_tiers or {}).items():
+                if bucket not in agg_tiers or entry["price"] < agg_tiers[bucket]["price"]:
+                    agg_tiers[bucket] = entry
             # Gentle spacing between calls to stay under Duffel's rate limit
             time.sleep(0.3)
         current += datetime.timedelta(days=1)
 
+    def _tier_detail(entry):
+        """Slim flight-detail dict for a tier's winning offer (for storage/UI)."""
+        if not entry:
+            return None
+        d = _extract_flight_details(entry["offer"]) or {}
+        return {
+            "airline": d.get("airline"),
+            "flight_number": d.get("flight_number"),
+            "departing_at": d.get("departing_at"),
+            "arriving_at": d.get("arriving_at"),
+            "returning_at": d.get("returning_at"),
+            "return_flight_number": d.get("return_flight_number"),
+            "stops_outbound": d.get("stops_outbound"),
+            "stops_inbound": d.get("stops_inbound"),
+            "connection_airports": d.get("connection_airports"),
+        }
+
     stop_tiers = {
-        "price_nonstop": agg_tiers.get(0),
-        "price_1_stop": agg_tiers.get(1),
-        "price_2_plus_stops": agg_tiers.get(2),
+        "price_nonstop": agg_tiers[0]["price"] if 0 in agg_tiers else None,
+        "price_1_stop": agg_tiers[1]["price"] if 1 in agg_tiers else None,
+        "price_2_plus_stops": agg_tiers[2]["price"] if 2 in agg_tiers else None,
+        "details": {
+            "nonstop": _tier_detail(agg_tiers.get(0)),
+            "1_stop": _tier_detail(agg_tiers.get(1)),
+            "2_plus": _tier_detail(agg_tiers.get(2)),
+        },
     }
 
     # If we found nothing AND hit an API error, surface the error.
@@ -201,8 +227,8 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
     Returns (price, currency, flight_details, error, tiers):
       * the overall cheapest offer's price/currency/details (or Nones),
       * error — None on success or genuinely-no-offers; a string on API failure,
-      * tiers — {stop_bucket: cheapest_price} for this date, bucket 0/1/2 (2 = 2+),
-        or None if there were no offers / an error.
+      * tiers — {stop_bucket: {"price", "offer"}} for this date's cheapest offer
+        at each level, bucket 0/1/2 (2 = 2+), or None on no-offers / error.
     """
     slices = [{"origin": origin, "destination": destination, "departure_date": departure_date}]
     if return_date:
@@ -258,7 +284,9 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
         if not offers:
             return None, None, None, None, None  # genuinely no flights for this date
 
-        # Cheapest price per stop tier (0 = nonstop, 1 = 1 stop, 2 = 2 or more)
+        # Cheapest OFFER per stop tier (0 = nonstop, 1 = 1 stop, 2 = 2 or more).
+        # Keep the whole offer so the caller can extract its details for the
+        # winning fare at each tier.
         tiers = {}
         for o in offers:
             try:
@@ -266,11 +294,11 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
             except (KeyError, ValueError, TypeError):
                 continue
             bucket = min(_total_stops(o), 2)
-            if bucket not in tiers or amt < tiers[bucket]:
-                tiers[bucket] = amt
+            if bucket not in tiers or amt < tiers[bucket]["price"]:
+                tiers[bucket] = {"price": amt, "offer": o}
 
         best = min(offers, key=lambda o: float(o["total_amount"]))
         details = _extract_flight_details(best)
         return float(best["total_amount"]), best["total_currency"], details, None, tiers
 
-    return None, None, None, "Duffel rate limit exceeded after retries"
+    return None, None, None, "Duffel rate limit exceeded after retries", None

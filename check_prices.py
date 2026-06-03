@@ -129,6 +129,9 @@ def check_all_watches():
             "price_nonstop": stop_tiers.get("price_nonstop"),
             "price_1_stop": stop_tiers.get("price_1_stop"),
             "price_2_plus_stops": stop_tiers.get("price_2_plus_stops"),
+            # Winning flight details at each tier (airline/dates/stops), for the
+            # expandable tier table in the UI
+            "stop_tier_details": stop_tiers.get("details"),
         }
         if flight_details:
             history_row["stops_outbound"] = flight_details.get("stops_outbound")

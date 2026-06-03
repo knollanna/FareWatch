@@ -1,6 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ─────────────── Expandable stop-tier row ───────────────
+   One row of the fare-options table. price is the tier total; shown per-person.
+   detail is the tier's winning flight details (or None for older data). #}
+{% macro tier_row(label, price, detail, is_best, pax) %}
+  {% if price %}
+  <details class="tier-row{{ ' tier-best' if is_best }}">
+    <summary>
+      <span class="tier-name">{{ label }}</span>
+      <span class="tier-price">${{ "{:,.0f}".format(price / pax) }}</span>
+    </summary>
+    <div class="tier-detail">
+      {% if detail %}
+        {% if detail.airline %}<div class="td-airline">{{ detail.airline }}</div>{% endif %}
+        {% if detail.returning_at %}
+          <div>out {{ detail.flight_number }} · {{ detail.departing_at[:10] }}{% if detail.departing_at[11:16] %} at {{ detail.departing_at[11:16] }}{% endif %}</div>
+          <div>return {{ detail.return_flight_number }} · {{ detail.returning_at[:10] }}{% if detail.returning_at[11:16] %} at {{ detail.returning_at[11:16] }}{% endif %}</div>
+        {% elif detail.departing_at %}
+          <div>{{ detail.flight_number }} · depart {{ detail.departing_at[:10] }}{% if detail.departing_at[11:16] %} at {{ detail.departing_at[11:16] }}{% endif %}</div>
+        {% endif %}
+        {% set tot = (detail.stops_outbound or 0) + (detail.stops_inbound or 0) %}
+        <div class="td-stops">{{ 'nonstop' if tot == 0 else (tot ~ ' stop' ~ ('s' if tot > 1 else '')) }}{% if detail.connection_airports %} · via {{ detail.connection_airports }}{% endif %}</div>
+      {% else %}
+        <div class="td-none">Flight details available after the next price check.</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+{% endmacro %}
+
 {# ─────────────── Active watch card macro ─────────────── #}
 {% macro active_card(w) %}
   {% set lp = w.latest_price %}
@@ -91,17 +120,17 @@
       <div class="progress-fill {{ 'on-target' if hit_target }}" style="width: {{ progress }}%"></div>
     </div>
 
-    <!-- cheapest fare at each stop level (only shown when ≥2 levels available).
-         Shown per-person when pax>1 so it lines up with the per-person target.
-         Highlight compares stored totals; dividing both by pax keeps the match. -->
+    <!-- Fare-options table: cheapest fare at each stop level, each row expands
+         to that fare's details. Shown per-person; only when ≥2 levels exist. -->
     {% if lp %}
       {% set tiers_present = [lp.price_nonstop, lp.price_1_stop, lp.price_2_plus_stops]|select|list %}
       {% if tiers_present|length >= 2 %}
-      <div class="stop-tiers">
-        {% if w.passengers > 1 %}<span class="tier-label">per person</span>{% endif %}
-        {% if lp.price_nonstop %}<span class="{{ 'tier-best' if lp.price_nonstop == lp.price }}">nonstop&nbsp;${{ "{:,.0f}".format(lp.price_nonstop / w.passengers) }}</span>{% endif %}
-        {% if lp.price_1_stop %}<span class="{{ 'tier-best' if lp.price_1_stop == lp.price }}">1&nbsp;stop&nbsp;${{ "{:,.0f}".format(lp.price_1_stop / w.passengers) }}</span>{% endif %}
-        {% if lp.price_2_plus_stops %}<span class="{{ 'tier-best' if lp.price_2_plus_stops == lp.price }}">2+&nbsp;stops&nbsp;${{ "{:,.0f}".format(lp.price_2_plus_stops / w.passengers) }}</span>{% endif %}
+      {% set det = lp.stop_tier_details or {} %}
+      <div class="tier-table">
+        {% if w.passengers > 1 %}<div class="tier-table-label">per person</div>{% endif %}
+        {{ tier_row('nonstop', lp.price_nonstop, det.get('nonstop'), lp.price_nonstop == lp.price, w.passengers) }}
+        {{ tier_row('1 stop', lp.price_1_stop, det.get('1_stop'), lp.price_1_stop == lp.price, w.passengers) }}
+        {{ tier_row('2+ stops', lp.price_2_plus_stops, det.get('2_plus'), lp.price_2_plus_stops == lp.price, w.passengers) }}
       </div>
       {% endif %}
     {% endif %}
