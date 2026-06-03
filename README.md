@@ -95,8 +95,11 @@ FareWatch is two programs that share one database — they never call each other
   (JSON: the winning fare's airline / flight numbers / dates / stops at each
   tier, for the expandable fare-options table on each card). This is the dataset
   behind the price charts and any future trend / stop-quality analysis.
-- **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric and
-  the once-per-new-low gating). Has a nullable `hotel_watch_id` for later.
+- **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric).
+  Alerts fire per **stop tier**: when any of nonstop / 1-stop / 2+ hits a new low
+  at/below the target (tracked against each tier's own price history), one
+  notification names every tier that improved. Has a nullable `hotel_watch_id`
+  for later.
 - **`hotel_watches`**, **`hotel_price_history`** — built for hotel monitoring
   (not yet used by any code).
 

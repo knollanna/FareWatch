@@ -79,8 +79,12 @@ heads-up email so nothing fails silently.
 
 **Smart alerts**
 - Email (to the client, copying the advisor) **and** Slack, fired together.
+- **Stops-aware:** alerts when *any* stop level (nonstop / 1-stop / 2+) hits a
+  new low at/below target — so a nonstop reaching a fresh low gets flagged even
+  if a connecting fare is technically cheaper. One notification names every tier
+  that improved.
 - Only alerts on a genuine **new low at/below target** — never repetitive.
-- Shows "down from $X (new low!)" context so the trend is obvious at a glance.
+- Shows "down from $X" context so the trend is obvious at a glance.
 - A booking hand-off: route, exact date, and flight number ready to search on
   the airline/Duffel side.
 
@@ -123,9 +127,8 @@ price history, and the advisor dashboard — running in production.
 **In progress:** hotel price monitoring (the database is ready; the hotel
 pricing integration is paused pending access to Duffel's Stays product).
 
-**Ideas for later:** stops-aware alerts (treating "same price, fewer stops" as a
-new deal — the per-stop pricing is already being captured), richer price-trend
-analysis, and a more direct booking hand-off.
+**Ideas for later:** richer price-trend analysis, and a more direct booking
+hand-off.
 
 ---
 
