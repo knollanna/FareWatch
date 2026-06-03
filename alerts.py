@@ -2,18 +2,21 @@
 Notifications — how FareWatch tells you (and clients) about fares.
 
 Three public functions, all called from check_prices.py:
-  * send_alert(...)        — the client-facing fare-drop EMAIL (via SendGrid).
+  * send_alert(...)        — the client-facing fare EMAIL (via SendGrid).
                              Goes to the client and copies you (SENDER_EMAIL).
   * send_slack_alert(...)  — a Slack Block Kit message to your alerts channel
                              (via SLACK_WEBHOOK_URL). Skips silently if unset.
   * send_error_alert(...)  — an internal email to you only, when a watch errors.
 
-Helpers build the email HTML/text and the Slack blocks. Everything degrades
-gracefully: a missing key or a failed request returns False instead of raising,
-so one channel breaking never blocks the others.
+send_alert / send_slack_alert take a list of "improved tiers" — each stop level
+(nonstop / 1-stop / 2+) that just hit a NEW LOW at/below the target on this check.
+One notification names all the tiers that improved.
 
-Note on pricing: prices passed in are TOTALS (all passengers). For multi-guest
-watches the messages also show the per-person figure for clarity.
+Everything degrades gracefully: a missing key or a failed request returns False
+instead of raising, so one channel breaking never blocks the others.
+
+Prices passed in are TOTALS (all passengers); messages show the per-person figure
+since that's what the target is set in.
 """
 import os
 import urllib.parse
@@ -63,244 +66,203 @@ AIRLINE_WEBSITES = {
 }
 
 
+# ── Formatting helpers ──────────────────────────────────────────────────────────
+
+def _fmt_short_date(d):
+    """'2026-07-12' -> 'Jul 12'."""
+    try:
+        from datetime import date
+        return date.fromisoformat(d).strftime("%b %-d")
+    except Exception:
+        return d
 
 
-def _format_datetime(dt_str):
-    """Turn '2026-06-12T09:45:00' into 'June 12, 2026 at 9:45am'."""
-    if not dt_str:
-        return dt_str
+def _fmt_flight_dt(iso):
+    """'2026-08-09T06:50:00' -> 'Aug 9, 6:50am'."""
+    if not iso:
+        return ""
     try:
         from datetime import datetime
-        dt = datetime.fromisoformat(dt_str)
-        return dt.strftime("%-d %B %Y at %-I:%M%p").replace("AM", "am").replace("PM", "pm")
+        dt = datetime.fromisoformat(iso)
+        h12 = dt.hour % 12 or 12
+        ap = "am" if dt.hour < 12 else "pm"
+        t = f"{h12}:{dt.minute:02d}{ap}" if dt.minute else f"{h12}{ap}"
+        return f"{dt.strftime('%b')} {dt.day}, {t}"
     except Exception:
-        return dt_str
+        return iso
 
 
-def _build_email_html(watch, price, flight_details, previous_low=None):
+def _tier_flight_line(detail):
+    """One-line flight summary for a tier: airline + flight number(s) + dates."""
+    if not detail:
+        return ""
+    airline = detail.get("airline") or ""
+    fn = detail.get("flight_number") or ""
+    dep = _fmt_flight_dt(detail.get("departing_at"))
+    if detail.get("returning_at"):
+        rfn = detail.get("return_flight_number") or ""
+        ret = _fmt_flight_dt(detail.get("returning_at"))
+        core = f"out {fn} {dep} · return {rfn} {ret}"
+    elif fn:
+        core = f"{fn} · departs {dep}"
+    else:
+        core = f"departs {dep}" if dep else ""
+    return f"{airline} · {core}" if (airline and core) else (airline or core)
+
+
+def _tier_stops_line(detail):
+    """Stops summary for a tier: 'nonstop' / '1 stop · via KEF' / '2 stops · via …'."""
+    if not detail:
+        return ""
+    tot = (detail.get("stops_outbound") or 0) + (detail.get("stops_inbound") or 0)
+    base = "nonstop" if tot == 0 else f"{tot} stop" + ("s" if tot > 1 else "")
+    conns = detail.get("connection_airports")
+    return f"{base} · via {conns}" if (conns and tot) else base
+
+
+# ── Email (SendGrid) ────────────────────────────────────────────────────────────
+
+def _build_tier_alert_html(watch, improved, passengers, currency):
     origin = watch["origin"]
     destination = watch["destination"]
-    date_from = watch["date_from"]
-    date_to = watch["date_to"]
-    passengers = watch["passengers"]
-    target_price = float(watch["target_price"])
     client_name = watch["client_name"]
-    currency = "USD"
-
+    target_pp = float(watch["target_price"]) / passengers
     pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
-    if passengers > 1:
-        price_note = f" total ({currency} {price / passengers:.2f} per person)"
-        target_note = f" total ({currency} {target_price / passengers:.2f} per person)"
-    else:
-        price_note = ""
-        target_note = ""
 
-    if previous_low is not None and price < float(previous_low):
-        drop_html = (f'<br><span style="font-weight:normal;font-size:12px;color:#2a7a2a;">'
-                     f'▼ down from {currency} {float(previous_low):.2f} (new low!)</span>')
-    else:
-        drop_html = ""
-    exact_date = flight_details["departing_at"] if flight_details else None
-    google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+    blocks = ""
+    for t in improved:
+        pp = t["price"] / passengers
+        if t["previous_low"] is not None:
+            note = (f'<span style="color:#2a7a2a;font-weight:normal;font-size:13px;">'
+                    f' ▼ down from {currency} {float(t["previous_low"]) / passengers:,.0f}/person</span>')
+        else:
+            note = '<span style="color:#2a7a2a;font-weight:normal;font-size:13px;"> (new!)</span>'
+        flight = _tier_flight_line(t["detail"])
+        stops = _tier_stops_line(t["detail"])
+        flight_html = f'<div style="font-size:13px;color:#555;margin-top:3px;">{flight}</div>' if flight else ""
+        stops_html = f'<div style="font-size:12px;color:#888;">{stops}</div>' if stops else ""
+        blocks += f"""
+  <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
+    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{t['label']} — {currency} {pp:,.0f}/person{note}</div>
+    {flight_html}
+    {stops_html}
+  </div>"""
+
+    best = min(improved, key=lambda t: t["price"])
+    exact_date = (best.get("detail") or {}).get("departing_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
 
     client_token = watch.get("client_token")
+    dash = ""
     if client_token:
-        client_url = f"{BASE_URL}/client/{client_token}"
-        client_page_section = f"""
-  <p style="margin:20px 0 8px;">
-    <a href="{client_url}"
-       style="background:#1D9E75;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
-      View your fare dashboard →
-    </a>
-  </p>"""
-    else:
-        client_page_section = ""
+        dash = (f'<p style="margin:20px 0 8px;"><a href="{BASE_URL}/client/{client_token}" '
+                f'style="background:#1D9E75;color:white;padding:12px 24px;text-decoration:none;'
+                f'border-radius:4px;font-weight:bold;">View your fare dashboard →</a></p>')
 
-    # Flight details rows (only shown if we have them)
-    flight_rows = ""
-    if flight_details:
-        dep = _format_datetime(flight_details["departing_at"])
-        arr = _format_datetime(flight_details["arriving_at"])
-        stops_label = flight_details.get("stops_label", "")
-        flight_rows = f"""
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Flight</td>
-      <td style="padding:10px 14px;">{flight_details['flight_number']} ({flight_details['airline']})</td>
-    </tr>
-    <tr>
-      <td style="padding:10px 14px;font-weight:bold;">Stops</td>
-      <td style="padding:10px 14px;">{stops_label}</td>
-    </tr>
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Trip type</td>
-      <td style="padding:10px 14px;">{flight_details['trip_type']}</td>
-    </tr>
-    <tr>
-      <td style="padding:10px 14px;font-weight:bold;">Departs</td>
-      <td style="padding:10px 14px;">{dep}</td>
-    </tr>
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Arrives</td>
-      <td style="padding:10px 14px;">{arr}</td>
-    </tr>"""
-        iata = flight_details["flight_number"].split()[0].upper()
-        airline_info = AIRLINE_WEBSITES.get(iata)
-        airline_link = (
-            f' or go directly to <a href="{airline_info[1]}">{airline_info[0]}</a>'
-            if airline_info else ""
-        )
-        link_section = f"""
-  <p style="margin:20px 0 8px;">
-    <a href="{google_url}"
-       style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
-      Search this route on Google Flights →
-    </a>
-  </p>
-  <p style="margin:0 0 20px;font-size:13px;color:#555;">
-    Search for flight <strong>{flight_details['flight_number']}</strong> departing {dep}{airline_link}.
-  </p>"""
-    else:
-        dep = None
-        link_section = f"""
-  <p style="margin:20px 0;">
-    <a href="{google_url}"
-       style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">
-      Search this route on Google Flights →
-    </a>
-  </p>"""
-
-    return f"""
-<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html>
 <body style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:560px;margin:0 auto;padding:24px;">
-
   <p>Hi {client_name},</p>
-  <p>Great news — a fare has dropped to your target price for your trip!</p>
-
-  <table style="border-collapse:collapse;width:100%;margin:20px 0;">
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Route</td>
-      <td style="padding:10px 14px;">{origin} → {destination}</td>
-    </tr>
-    <tr>
-      <td style="padding:10px 14px;font-weight:bold;">Travel window</td>
-      <td style="padding:10px 14px;">{date_from} – {date_to}</td>
-    </tr>
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Passengers</td>
-      <td style="padding:10px 14px;">{pax_label}</td>
-    </tr>{flight_rows}
-    <tr>
-      <td style="padding:10px 14px;font-weight:bold;">Current price</td>
-      <td style="padding:10px 14px;color:#2a7a2a;font-weight:bold;">{currency} {price:.2f}{price_note}{drop_html}</td>
-    </tr>
-    <tr style="background:#f5f5f5;">
-      <td style="padding:10px 14px;font-weight:bold;">Your target</td>
-      <td style="padding:10px 14px;">{currency} {target_price:.2f}{target_note}</td>
-    </tr>
+  <p>Good news — a better fare just turned up for your <strong>{origin} → {destination}</strong> trip:</p>
+  {blocks}
+  <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
+    <tr><td style="padding:4px 0;">Travel window</td><td style="padding:4px 0;text-align:right;">{watch['date_from']} – {watch['date_to']}</td></tr>
+    <tr><td style="padding:4px 0;">Passengers</td><td style="padding:4px 0;text-align:right;">{pax_label}</td></tr>
+    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target_pp:,.0f}/person</td></tr>
   </table>
-
-  {link_section}
-
+  <p style="margin:16px 0 4px;"><a href="{google_url}" style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">Search on Google Flights →</a></p>
   <p>Fares at this price can disappear quickly — <strong>reply to this email</strong> and I'll get your booking sorted right away.</p>
-
-  {client_page_section}
-
+  {dash}
   <p style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:13px;color:#888;">
     Anna Knoll &nbsp;·&nbsp; Independent Travel Advisor &nbsp;·&nbsp; Fora Travel<br>
     <a href="mailto:{SENDER_EMAIL}" style="color:#1D9E75;">{SENDER_EMAIL}</a>
   </p>
-
 </body>
-</html>
-"""
+</html>"""
 
 
-def _build_email_text(watch, price, flight_details, previous_low=None):
+def _build_tier_alert_text(watch, improved, passengers, currency):
     origin = watch["origin"]
     destination = watch["destination"]
-    date_from = watch["date_from"]
-    date_to = watch["date_to"]
-    passengers = watch["passengers"]
-    target_price = float(watch["target_price"])
-    client_name = watch["client_name"]
-    currency = "USD"
-    exact_date = flight_details["departing_at"] if flight_details else None
-    google_url = _google_flights_url(origin, destination, date_from, passengers, exact_date)
+    target_pp = float(watch["target_price"]) / passengers
+
+    lines = [
+        f"Hi {watch['client_name']},", "",
+        f"Good news — a better fare just turned up for your {origin} → {destination} trip:", "",
+    ]
+    for t in improved:
+        pp = t["price"] / passengers
+        if t["previous_low"] is not None:
+            note = f" (down from {currency} {float(t['previous_low']) / passengers:,.0f}/person)"
+        else:
+            note = " (new!)"
+        lines.append(f"{t['label']}: {currency} {pp:,.0f}/person{note}")
+        fl = _tier_flight_line(t["detail"])
+        st = _tier_stops_line(t["detail"])
+        if fl:
+            lines.append(f"  {fl}")
+        if st:
+            lines.append(f"  {st}")
+        lines.append("")
+
+    best = min(improved, key=lambda t: t["price"])
+    exact_date = (best.get("detail") or {}).get("departing_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
+
+    lines += [
+        f"Travel window: {watch['date_from']} – {watch['date_to']}",
+        f"Passengers: {passengers}",
+        f"Your target: {currency} {target_pp:,.0f}/person",
+        "",
+        f"Search Google Flights: {google_url}",
+        "",
+        "Fares at this price can disappear quickly — reply to this email and I'll get your booking sorted right away.",
+    ]
     client_token = watch.get("client_token")
-    client_url = f"{BASE_URL}/client/{client_token}" if client_token else None
-
-    flight_lines = ""
-    if flight_details:
-        dep = _format_datetime(flight_details["departing_at"])
-        arr = _format_datetime(flight_details["arriving_at"])
-        stops_label = flight_details.get("stops_label", "")
-        flight_lines = (
-            f"Flight: {flight_details['flight_number']} ({flight_details['airline']})\n"
-            f"Stops: {stops_label}\n"
-            f"Trip type: {flight_details['trip_type']}\n"
-            f"Departs: {dep}\n"
-            f"Arrives: {arr}\n"
-        )
-        iata = flight_details["flight_number"].split()[0].upper()
-        airline_info = AIRLINE_WEBSITES.get(iata)
-        airline_line = f"\n{airline_info[0]} website: {airline_info[1]}" if airline_info else ""
-        search_tip = f"Search Google Flights: {google_url}\nLook for flight {flight_details['flight_number']} departing {dep}.{airline_line}"
-    else:
-        search_tip = f"Search Google Flights: {google_url}"
-
-    return f"""Hi {client_name},
-
-Great news — a fare has dropped to your target price for your trip!
-
-Route: {origin} → {destination}
-Travel window: {date_from} – {date_to}
-Passengers: {passengers}
-{flight_lines}Current price: {currency} {price:.2f}{f" total ({currency} {price / passengers:.2f} per person)" if passengers > 1 else ""}{f" — down from {currency} {float(previous_low):.2f} (new low!)" if (previous_low is not None and price < float(previous_low)) else ""}
-Your target: {currency} {target_price:.2f}{f" total ({currency} {target_price / passengers:.2f} per person)" if passengers > 1 else ""}
-
-{search_tip}
-
-Fares at this price can disappear quickly — reply to this email and I'll get your booking sorted right away.
-{f"View your fare dashboard: {client_url}" if client_url else ""}
-
-Anna Knoll · Independent Travel Advisor · Fora Travel
-
-Warm regards,
-Anna
-{SENDER_EMAIL}
-"""
+    if client_token:
+        lines.append(f"View your fare dashboard: {BASE_URL}/client/{client_token}")
+    lines += ["", "Anna Knoll · Independent Travel Advisor · Fora Travel", SENDER_EMAIL]
+    return "\n".join(lines)
 
 
-def send_alert(watch, price, flight_details=None, previous_low=None):
-    """Send a fare alert email to the client (and a copy to SENDER_EMAIL)."""
+def send_alert(watch, improved, passengers, currency="USD"):
+    """Email the client (cc Anna) about stop tier(s) hitting a new low under target.
+
+    `improved` is a list of {label, price (total), previous_low (total|None),
+    detail}. Returns True on success, False otherwise (never raises).
+    """
+    if not improved:
+        return False
+
+    origin = watch["origin"]
+    destination = watch["destination"]
     client_email = watch.get("client_email", "").strip()
     client_name = watch["client_name"]
-    origin = watch["origin"]
-    destination = watch["destination"]
-    subject = f"Fare alert: {origin} → {destination} — USD {price:.2f}"
 
-    html_body = _build_email_html(watch, price, flight_details, previous_low)
-    text_body = _build_email_text(watch, price, flight_details, previous_low)
+    if len(improved) == 1:
+        t = improved[0]
+        subject = (f"Fare alert: {origin} → {destination} — "
+                   f"{t['label'].lower()} {currency} {t['price'] / passengers:,.0f}/person")
+    else:
+        subject = f"Fare alert: {origin} → {destination} — {len(improved)} new fare lows"
+
+    html_body = _build_tier_alert_html(watch, improved, passengers, currency)
+    text_body = _build_tier_alert_text(watch, improved, passengers, currency)
 
     to_list = []
     if client_email and "@" in client_email and client_email != SENDER_EMAIL:
         to_list.append({"email": client_email, "name": client_name})
-
     cc_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
-
     if not to_list:
         to_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
         cc_list = []
 
     payload = {
-        "personalizations": [
-            {
-                "to": to_list,
-                **({"cc": cc_list} if cc_list else {}),
-                "subject": subject,
-            }
-        ],
+        "personalizations": [{
+            "to": to_list,
+            **({"cc": cc_list} if cc_list else {}),
+            "subject": subject,
+        }],
         "from": {"email": SENDER_EMAIL, "name": "Anna | FareWatch"},
         "reply_to": {"email": SENDER_EMAIL, "name": "Anna"},
         "content": [
@@ -308,12 +270,10 @@ def send_alert(watch, price, flight_details=None, previous_low=None):
             {"type": "text/html", "value": html_body},
         ],
     }
-
     headers = {
         "Authorization": f"Bearer {SENDGRID_API_KEY}",
         "Content-Type": "application/json",
     }
-
     try:
         response = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
         if response.status_code == 202:
@@ -325,55 +285,39 @@ def send_alert(watch, price, flight_details=None, previous_low=None):
         return False
 
 
-def _fmt_short_date(d):
-    """'2026-07-12' -> 'Jul 12'."""
-    try:
-        from datetime import date
-        return date.fromisoformat(d).strftime("%b %-d")
-    except Exception:
-        return d
+# ── Slack ───────────────────────────────────────────────────────────────────────
 
+def send_slack_alert(watch, improved, passengers, currency="USD"):
+    """Post a Block Kit alert naming the stop tier(s) that hit a new low under target.
 
-def send_slack_alert(watch, price, stops=None, previous_low=None):
+    Skips silently (returns False) if SLACK_WEBHOOK_URL is unset or `improved` empty.
     """
-    Post a Block Kit alert to the Slack incoming webhook.
-    Skips silently (returns False) if SLACK_WEBHOOK_URL is not configured.
-    `previous_low` adds a "down from $X" context line when this fare beats it.
-    """
-    if not SLACK_WEBHOOK_URL:
+    if not SLACK_WEBHOOK_URL or not improved:
         return False
 
     origin = watch["origin"]
     destination = watch["destination"]
-    passengers = watch["passengers"]
-    target = float(watch["target_price"])
     client_name = watch.get("client_name") or "—"
-    date_from = watch["date_from"]
-    date_to = watch["date_to"]
-
-    below_target = price <= target
-    emoji = "🎯" if below_target else "📈"
-    headline = "Target hit" if below_target else "Price increase"
-
+    target_pp = float(watch["target_price"]) / passengers
+    dates = f"{_fmt_short_date(watch['date_from'])} – {_fmt_short_date(watch['date_to'])}"
     pax_label = f"{passengers} passenger{'s' if passengers > 1 else ''}"
-    dates = f"{_fmt_short_date(date_from)} – {_fmt_short_date(date_to)}"
-    google_url = _google_flights_url(origin, destination, date_from, passengers)
 
-    # Fare line, with "down from previous low" context when applicable
-    if previous_low is not None and price < float(previous_low):
-        fare_line = (f"*Fare:* ${price:,.0f} ⬇ down from ${float(previous_low):,.0f} "
-                     f"_(new low!)_ · target ${target:,.0f}")
-    else:
-        fare_line = f"*Fare:* ${price:,.0f} (target: ${target:,.0f})"
+    lines = [f"🎯 *New low: {origin} → {destination}*", f"*Client:* {client_name}"]
+    for t in improved:
+        pp = t["price"] / passengers
+        if t["previous_low"] is not None:
+            note = f" ⬇ from ${float(t['previous_low']) / passengers:,.0f}"
+        else:
+            note = " _(new!)_"
+        fl = _tier_flight_line(t["detail"])
+        extra = f" · {fl}" if fl else ""
+        lines.append(f"*{t['label']}:* ${pp:,.0f}/person{note}{extra}")
+    lines.append(f"*Dates:* {dates} · {pax_label}")
+    lines.append(f"*Target:* ${target_pp:,.0f}/person")
 
-    lines = [
-        f"{emoji} *{headline}: {origin} → {destination}*",
-        f"*Client:* {client_name}",
-        fare_line,
-        f"*Dates:* {dates} · {pax_label}",
-    ]
-    if stops:
-        lines.append(f"*Flight:* {stops}")
+    best = min(improved, key=lambda t: t["price"])
+    exact_date = (best.get("detail") or {}).get("departing_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
 
     payload = {
         "blocks": [
@@ -385,7 +329,6 @@ def send_slack_alert(watch, price, stops=None, previous_low=None):
             }]},
         ]
     }
-
     try:
         r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
         if r.status_code == 200:
@@ -396,6 +339,8 @@ def send_slack_alert(watch, price, stops=None, previous_low=None):
         print(f"  [slack] failed to send: {e}")
         return False
 
+
+# ── Internal error notice (to Anna only) ────────────────────────────────────────
 
 def send_error_alert(watch, error_message):
     """Notify Anna (SENDER_EMAIL only — never the client) when a watch errors."""

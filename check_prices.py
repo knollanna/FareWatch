@@ -48,6 +48,33 @@ def get_previous_lowest(watch_id):
     return None
 
 
+def get_previous_tier_lows(watch_id):
+    """Lowest price ever recorded at each stop tier for this watch.
+
+    Returns {"nonstop", "1_stop", "2_plus"} -> float or None. Must be called
+    BEFORE inserting the current check's row, so the new row isn't counted as
+    its own previous low (which would suppress the alert).
+    """
+    def tier_min(col):
+        r = (
+            supabase.table("price_history")
+            .select(col)
+            .eq("watch_id", watch_id)
+            .not_.is_(col, "null")
+            .order(col, desc=False)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return float(r[0][col]) if r else None
+
+    return {
+        "nonstop": tier_min("price_nonstop"),
+        "1_stop": tier_min("price_1_stop"),
+        "2_plus": tier_min("price_2_plus_stops"),
+    }
+
+
 def set_error(watch_id, message):
     """Store a human-readable failure reason on the watch (shown in the UI)."""
     supabase.table("watches").update({"last_error": message}).eq("id", watch_id).execute()
@@ -115,10 +142,9 @@ def check_all_watches():
         # Successful check — clear any previous error
         clear_error(watch["id"])
 
-        # Capture the previous lowest BEFORE inserting this check's row, so the
-        # new row isn't counted as its own "previous low" (which would make
-        # is_new_low always false and suppress every alert).
-        previous_lowest = get_previous_lowest(watch["id"])
+        # Capture each tier's previous low BEFORE inserting this check's row, so
+        # the new row isn't counted as its own "previous low".
+        prev_tier_lows = get_previous_tier_lows(watch["id"])
 
         # Save to price_history
         history_row = {
@@ -150,40 +176,60 @@ def check_all_watches():
         if flight_details:
             print(f"  Flight: {flight_details['flight_number']} | {flight_details['trip_type']} | Departs {flight_details['departing_at']}")
 
-        # Send alerts if price is at/below target AND is a new lowest price
-        if price <= target:
-            is_new_low = previous_lowest is None or price < previous_lowest
-            if is_new_low:
-                print(f"  New lowest price found — sending alerts.")
-                stops = flight_details.get("stops_label") if flight_details else None
-                email_ok = False
-                slack_ok = False
+        # Determine which stop tiers just hit a NEW LOW at/below target.
+        # A tier qualifies if its fare this check is <= target AND lower than
+        # that tier has ever been before. The overall-cheapest fare is just
+        # whichever tier is lowest, so this naturally covers it.
+        tier_specs = [
+            ("Nonstop", "price_nonstop", "nonstop"),
+            ("1 stop", "price_1_stop", "1_stop"),
+            ("2+ stops", "price_2_plus_stops", "2_plus"),
+        ]
+        tier_details = stop_tiers.get("details") or {}
+        improved = []
+        for label, price_key, detail_key in tier_specs:
+            cur = stop_tiers.get(price_key)
+            if cur is None or cur > target:
+                continue
+            prev = prev_tier_lows.get(detail_key)
+            if prev is None or cur < prev:
+                improved.append({
+                    "label": label,
+                    "price": cur,
+                    "previous_low": prev,
+                    "detail": tier_details.get(detail_key),
+                })
 
-                # Email (failure here must not block Slack)
-                try:
-                    email_ok = send_alert(watch, price, flight_details, previous_lowest, currency)
-                    if email_ok:
-                        print(f"  ✉️  Email sent to {watch['client_email']}")
-                except Exception as e:
-                    print(f"  ✉️  Email failed: {e}")
+        if improved:
+            names = ", ".join(t["label"].lower() for t in improved)
+            print(f"  New tier low(s) under target: {names} — sending alerts.")
+            email_ok = False
+            slack_ok = False
 
-                # Slack (failure here must not block anything else)
-                try:
-                    slack_ok = send_slack_alert(watch, price, stops, previous_lowest)
-                    if slack_ok:
-                        print(f"  💬 Slack notification sent")
-                except Exception as e:
-                    print(f"  💬 Slack failed: {e}")
+            # Email (failure here must not block Slack)
+            try:
+                email_ok = send_alert(watch, improved, watch["passengers"], currency)
+                if email_ok:
+                    print(f"  ✉️  Email sent to {watch['client_email']}")
+            except Exception as e:
+                print(f"  ✉️  Email failed: {e}")
 
-                # Record the alert event if either channel fired
-                if email_ok or slack_ok:
-                    supabase.table("sent_alerts").insert({
-                        "watch_id": watch["id"],
-                        "price": price,
-                    }).execute()
-            else:
-                prev_txt = f"{currency} {previous_lowest:.2f}" if previous_lowest is not None else "n/a"
-                print(f"  skipping — not a new low (previous low {prev_txt})")
+            # Slack (failure here must not block anything else)
+            try:
+                slack_ok = send_slack_alert(watch, improved, watch["passengers"], currency)
+                if slack_ok:
+                    print(f"  💬 Slack notification sent")
+            except Exception as e:
+                print(f"  💬 Slack failed: {e}")
+
+            # Record the alert event if either channel fired
+            if email_ok or slack_ok:
+                supabase.table("sent_alerts").insert({
+                    "watch_id": watch["id"],
+                    "price": price,
+                }).execute()
+        elif price <= target:
+            print(f"  at/below target but no tier hit a new low — skipping.")
 
         print()
 
