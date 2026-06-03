@@ -71,6 +71,10 @@ heads-up email so nothing fails silently.
 - Real airline fares via Duffel, checked every 2 hours, 24/7.
 - Captures the winning flight's airline, flight numbers, departure/return times,
   and number of stops with connecting airports.
+- Records the cheapest fare at each **stop level** (nonstop / 1-stop / 2+) and
+  shows them on each card, so you can see the trade-off between price and stops
+  at a glance — a nonstop a few dollars more than the cheapest connection is no
+  longer hidden.
 
 **Smart alerts**
 - Email (to the client, copying the advisor) **and** Slack, fired together.
@@ -82,7 +86,8 @@ heads-up email so nothing fails silently.
 **Client experience**
 - A private, link-only status page per client (no login required).
 - Live current price vs target, a progress bar, and a price-history chart.
-- A clear "🎯 target reached" state, auto-refreshing, professionally branded.
+- Clear states: "🎯 Target reached", "⏸ Paused" (if a watch is temporarily
+  paused by the advisor), auto-refreshing, professionally branded.
 
 **Advisor dashboard**
 - All watches grouped by client, with at-a-glance metrics.
@@ -114,8 +119,9 @@ price history, and the advisor dashboard — running in production.
 **In progress:** hotel price monitoring (the database is ready; the hotel
 pricing integration is paused pending access to Duffel's Stays product).
 
-**Ideas for later:** richer price-trend analysis, and a more direct booking
-hand-off.
+**Ideas for later:** stops-aware alerts (treating "same price, fewer stops" as a
+new deal — the per-stop pricing is already being captured), richer price-trend
+analysis, and a more direct booking hand-off.
 
 ---
 

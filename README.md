@@ -42,14 +42,20 @@ FareWatch is two programs that share one database — they never call each other
 
 **Application code**
 - `app.py` — Flask web app: login, the watch dashboard, add/edit/pause/resume/
-  delete, the price-history JSON endpoint, the public `/client/<token>` pages,
-  and the `/usage` page.
+  delete, the price-history JSON endpoint (`/history/<watch_id>` — public, no
+  login required, so the client page's price chart can load it), the public
+  `/client/<token>` pages (shows all watches for a token — including paused ones
+  — so clients never hit a 404 just because their watches are paused), and the
+  `/usage` page.
 - `check_prices.py` — the cron job. Fetches fares, stores price history, fires
   alerts. The "automation" of FareWatch.
 - `duffel.py` — flights integration. `get_lowest_fare(...)` searches Duffel and
-  returns the cheapest fare + flight details. Handles rate limits.
+  returns the cheapest fare + flight details, plus the cheapest price at each
+  stop level (nonstop / 1-stop / 2+). Handles rate limits by honouring Duffel's
+  `ratelimit-reset` Unix-timestamp header with up to 6 retries.
 - `alerts.py` — notifications: client fare-drop email (SendGrid), Slack message
-  (webhook), and internal error email.
+  (webhook), and internal error email. Currency is passed through from Duffel
+  (not assumed to be USD).
 - `usage.py` — powers the `/usage` page (SendGrid / Duffel / Supabase / Render
   consumption).
 - `duffel_stays.py` — *(not built yet)* hotel integration, Session 10B.
@@ -82,8 +88,11 @@ FareWatch is two programs that share one database — they never call each other
   client name/email/token, `is_active` / `is_paused`, `last_error`, booking ref.
 - **`price_history`** — one row per price check (on *every* check, not just
   alerts). Price + currency + `checked_at` + flight details (airline, flight
-  numbers, departure/return times, stops, connections). This is the dataset
-  behind the price charts and any future trend analysis.
+  numbers, departure/return times, stops, connections). Also records the
+  cheapest fare at each **stop level** that check (`price_nonstop`,
+  `price_1_stop`, `price_2_plus_stops`) — so a nonstop priced just above the
+  cheapest connecting fare is no longer thrown away. This is the dataset behind
+  the price charts and any future trend / stop-quality analysis.
 - **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric and
   the once-per-new-low gating). Has a nullable `hotel_watch_id` for later.
 - **`hotel_watches`**, **`hotel_price_history`** — built for hotel monitoring
@@ -111,6 +120,7 @@ All configuration is via env vars (local: `.env`; production: Render dashboard).
 | `APP_PASSWORD` | The single password to log into the admin UI. |
 | `FLASK_SECRET_KEY` | Long random string that signs login sessions. |
 | `RENDER_API_KEY` | Optional — enables live status/last-deploy on the usage page. |
+| `PYTHON_VERSION` | Pinned to `3.13.0` in `render.yaml` for both the web service and cron job. |
 
 ---
 
