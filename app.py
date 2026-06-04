@@ -253,6 +253,7 @@ def index():
         .select("*")
         .eq("is_active", True)
         .eq("is_paused", False)
+        .eq("is_archived", False)
         .order("date_from", desc=False)
         .execute()
         .data
@@ -261,7 +262,16 @@ def index():
         supabase.table("watches")
         .select("*")
         .eq("is_paused", True)
+        .eq("is_archived", False)
         .order("date_from", desc=False)
+        .execute()
+        .data
+    )
+    past_watches = (
+        supabase.table("watches")
+        .select("*")
+        .eq("is_archived", True)
+        .order("date_from", desc=True)
         .execute()
         .data
     )
@@ -269,6 +279,7 @@ def index():
 
     _attach_watch_extras(active_watches)
     _attach_watch_extras(paused_watches)
+    _attach_watch_extras(past_watches)
 
     groups = _group_by_client(active_watches, paused_watches)
     metrics = _get_metrics(active_watches, all_watches)
@@ -276,6 +287,8 @@ def index():
 
     return render_template("index.html",
                            groups=groups,
+                           past_watches=past_watches,
+                           today=datetime.date.today().isoformat(),
                            metrics=metrics,
                            recent_alerts=recent_alerts)
 
@@ -386,6 +399,28 @@ def resume_watch(watch_id):
     """Reactivate a paused watch."""
     supabase.table("watches").update({"is_active": True, "is_paused": False}).eq("id", watch_id).execute()
     flash("Watch resumed.")
+    return redirect(url_for("index"))
+
+
+@app.route("/archive/<watch_id>", methods=["POST"])
+@login_required
+def archive_watch(watch_id):
+    """Close a watch (move to Past watches). Keeps its history; stops checking it."""
+    supabase.table("watches").update(
+        {"is_archived": True, "is_active": False, "is_paused": False}
+    ).eq("id", watch_id).execute()
+    flash("Watch closed and moved to past watches.")
+    return redirect(url_for("index"))
+
+
+@app.route("/unarchive/<watch_id>", methods=["POST"])
+@login_required
+def unarchive_watch(watch_id):
+    """Reopen a closed watch as active."""
+    supabase.table("watches").update(
+        {"is_archived": False, "is_active": True, "is_paused": False}
+    ).eq("id", watch_id).execute()
+    flash("Watch reopened.")
     return redirect(url_for("index"))
 
 

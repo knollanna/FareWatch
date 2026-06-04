@@ -96,6 +96,7 @@ def check_all_watches():
         .select("*")
         .eq("is_active", True)
         .eq("is_paused", False)
+        .eq("is_archived", False)
         .execute()
         .data
     )

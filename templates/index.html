@@ -44,7 +44,9 @@
 
     <div class="card-badges">
       <div>
-        {% if hit_target %}
+        {% if today and w.date_to < today %}
+          <span class="badge badge-past" title="Travel dates have passed — you can close this watch">✈ dates passed</span>
+        {% elif hit_target %}
           <span class="badge badge-drop">price drop ✓</span>
         {% elif w.last_error %}
           <span class="badge badge-error" title="{{ w.last_error }}">⚠ error</span>
@@ -140,6 +142,9 @@
       <button class="btn-sm accent" onclick="toggleEdit('{{ w.id }}', this)">edit</button>
       <form method="POST" action="/pause/{{ w.id }}">
         <button class="btn-sm" type="submit">⏸ pause</button>
+      </form>
+      <form method="POST" action="/archive/{{ w.id }}">
+        <button class="btn-sm" type="submit" title="Close & move to past watches">close</button>
       </form>
       <form method="POST" action="/delete/{{ w.id }}"
             onsubmit="return confirm('Permanently delete this watch and all its history?')">
@@ -396,6 +401,44 @@
     </form>
   </div>
 
+  <!-- ── Past watches (closed) ──────────────────────────────────────────── -->
+  {% if past_watches %}
+  <div class="paused-section">
+    <button class="paused-toggle" onclick="togglePast(this)">
+      <span>▶</span> past watches ({{ past_watches|length }})
+    </button>
+    <div id="past-list" style="display:none">
+      <div class="cards-grid">
+        {% for w in past_watches %}
+        {% set lp = w.latest_price %}
+        <div class="watch-card paused-card">
+          <div class="card-badges">
+            <span class="badge badge-past">closed</span>
+            <span class="badge badge-client">{{ w.client_name }}</span>
+          </div>
+          <div class="card-route">{{ w.origin }}<span class="arrow">→</span>{{ w.destination }}</div>
+          <div class="card-meta">
+            <span>{{ w.date_from }} – {{ w.date_to }}</span>
+            <span>{{ w.passengers }} pax</span>
+            {% if w.booking_reference %}<span>✓ booked {{ w.booking_reference }}</span>{% endif %}
+            {% if lp %}<span>last ${{ "%.2f"|format(lp.price) }}</span>{% endif %}
+          </div>
+          <div class="card-actions">
+            <form method="POST" action="/unarchive/{{ w.id }}">
+              <button class="btn-sm accent" type="submit" title="Reopen as an active watch">▶ reopen</button>
+            </form>
+            <form method="POST" action="/delete/{{ w.id }}"
+                  onsubmit="return confirm('Permanently delete this watch and all its history?')">
+              <button class="btn-sm danger" type="submit">delete</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Recent alerts ──────────────────────────────────────────────────── -->
   <div class="alerts-section">
     <div class="section-heading">recent alerts</div>
@@ -434,6 +477,13 @@ function openAddForm(clientName, clientEmail) {
 function closeAddForm() {
   document.getElementById('add-form-wrap').classList.remove('open');
   document.getElementById('add-watch-btn').style.display = '';
+}
+
+function togglePast(btn) {
+  const list = document.getElementById('past-list');
+  const open = list.style.display === 'none';
+  list.style.display = open ? '' : 'none';
+  btn.querySelector('span').textContent = open ? '▼' : '▶';
 }
 
 function toggleReturnDates() {
