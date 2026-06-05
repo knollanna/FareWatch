@@ -1,0 +1,192 @@
+# FareWatch — Project Context & History
+
+> A living context document for re-establishing the full picture quickly (e.g.
+> after a conversation reset). For the product pitch see
+> [product-overview.md](product-overview.md); for setup/run details see the main
+> [README](../README.md); the **schema source of truth** is
+> `supabase/migrations/`.
+
+---
+
+## 1. What it is
+
+A flight-fare monitoring tool for **Anna Knoll, an independent travel advisor
+(Fora Travel)**. She sets up **watches** on routes/dates for clients; FareWatch
+checks Duffel every 2 hours, records prices, and emails + Slacks her (and the
+client) when a fare hits target. Each client gets a private link to a live
+status page. Deployed at **farewatch.annaknoll.com**.
+
+Hotels are planned but **blocked** (see §9).
+
+---
+
+## 2. Architecture
+
+Two programs sharing one database — they never call each other:
+
+| Part | Files | Runs | Job |
+|---|---|---|---|
+| **Web app** | `app.py` + `templates/` | always-on (gunicorn on Render) | admin dashboard + public client pages |
+| **Price checker** | `check_prices.py` | Render cron, **every 2h, 24/7** (`0 */2 * * *`) | search Duffel, store prices, send alerts |
+
+External services: **Duffel** (flight fares), **SendGrid** (email), **Slack**
+(webhook), **Supabase/Postgres** (DB), **Render** (hosting).
+
+---
+
+## 3. Stack & key files
+
+- `app.py` — Flask: login, dashboard (`/`), add/edit/pause/resume/**archive**/
+  delete, `/history/<id>` (JSON for charts, **public** so client pages work),
+  `/client/<token>` (public client page), `/usage`, `/trends`.
+- `check_prices.py` — the cron. Fetches fares, writes `price_history`, fires alerts.
+- `duffel.py` — flights. `get_lowest_fare(...)` returns `(price, currency,
+  flight_details, error, stop_tiers, date_prices)`. Handles rate limits.
+- `alerts.py` — email (SendGrid) + Slack (Block Kit) + internal error email.
+- `usage.py` — `/usage` page (SendGrid/Duffel/Supabase/Render metrics).
+- `duffel_stays.py` — **not built** (hotels, blocked).
+- Templates: `base.html`, `index.html` (dashboard), `client.html`, `usage.html`,
+  `trends.html`, `add_watch.html`, `login.html`, `client_not_found.html`.
+  One stylesheet: `static/style.css`. `static/airports.json` powers autocomplete.
+- Utility scripts: `prepare_airports.py`, `generate_tokens.py`.
+
+---
+
+## 4. Database schema (current)
+
+RLS is ON for every table with an "Allow all" policy (the app gates access via a
+shared password + anon key).
+
+- **`watches`** — `origin`, `destination`, `date_from`, `date_to`, `passengers`,
+  `target_price` (**stored as TOTAL** = per-person × passengers), `trip_type`,
+  `return_date_from/to`, `client_name/email/token`, `is_active`, `is_paused`,
+  `is_archived` (closed/past), `last_error`, `booking_reference`, `booked_at`.
+- **`price_history`** — one row per check: `price` (overall cheapest total),
+  `currency`, `checked_at`, flight details (`airline`, `flight_number`,
+  `departing_at`, `returning_at`, `return_flight_number`, `stops_outbound`,
+  `stops_inbound`, `connection_airports`), per-tier prices (`price_nonstop`,
+  `price_1_stop`, `price_2_plus_stops`), `stop_tier_details` (JSONB: per-tier
+  flight details), `date_prices` (JSONB: cheapest fare per departure date).
+- **`sent_alerts`** — log of alerts (`watch_id`, `price`, `sent_at`,
+  `hotel_watch_id`).
+- **`hotel_watches`**, **`hotel_price_history`** — built, **unused** (Stays
+  blocked). `sent_alerts.hotel_watch_id` links to them.
+
+---
+
+## 5. Environments & workflow
+
+**Two Supabase databases + two Duffel tokens, kept separate:**
+
+| | Database | Duffel token |
+|---|---|---|
+| Local dev | local Supabase stack (Docker, `supabase start`) | `duffel_test_…` (sandbox) |
+| Production | Supabase cloud (`qelanerqtfzqsgyddfmw`) | `duffel_live_…` |
+
+This split exists because local + prod once shared one DB and a local
+`check_prices.py` run with the test token polluted production with fake "Duffel
+Airways" fares. Now isolated.
+
+**Schema changes go through migrations** (never hand-edit the dashboard):
+```
+supabase migration new <name>   # write SQL
+supabase migration up           # apply locally
+git add supabase/migrations/ && git commit
+supabase db push                # apply to prod (CLI is linked + baselined)
+```
+Details in `supabase/README.md`. Local stack needs Docker Desktop running.
+**Gotcha:** when adding a column the app SELECTs, push the migration to prod
+**before** deploying the code, or prod 500s on the missing column.
+
+**Deploy:** push to `main` → Render auto-deploys both web + cron. Free-tier web
+spins down after ~15 min idle (cold start on next visit) — normal, and the cron
+runs independently. No per-spin-up charge; metered on instance-hours (free 750/mo).
+
+**Env vars:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DUFFEL_API_TOKEN`,
+`SENDGRID_API_KEY`, `SENDER_EMAIL`, `SLACK_WEBHOOK_URL`, `BASE_URL`,
+`APP_PASSWORD`, `FLASK_SECRET_KEY`, `RENDER_API_KEY` (optional). App password is
+currently `REDACTED`.
+
+---
+
+## 6. Feature history (what was built, roughly in order)
+
+1. **Foundation** — Flask app, Supabase, watches + price_history, login.
+2. **Duffel integration** — `get_lowest_fare`; cron checks every N hours.
+3. **Alerts** — SendGrid email with flight details + Google Flights link.
+4. **Client pages** — `/client/<token>`, readable name-based tokens.
+5. **Render deploy** — gunicorn + cron + custom domain (Cloudflare CNAME).
+6. **UI redesign** — fonts (DM Serif/Syne/DM Mono), accent `#1D9E75`, card layout,
+   metrics row, inline add form, airport autocomplete.
+7. **Usage page** — live SendGrid/Duffel/Supabase/Render metrics.
+8. **Slack alerts** + a fixed bug where alerts had silently stopped firing
+   (previous-low was read *after* inserting the new row).
+9. **Per-person pricing** — target entered per-person, stored as total; displays
+   show per-person + total.
+10. **Round-trip** support, **stops** info, **"book on Duffel"** + manual booking ref.
+11. **Local-dev environment** — Supabase CLI + Docker, migrations, prod baseline.
+12. **Hotels schema (10A)** — tables created. **10B blocked** (Stays not enabled).
+13. **Stop-tier capture & display** — cheapest fare per stop level (nonstop/1/2+),
+    expandable per-tier table on cards.
+14. **Stops-aware alerts** — alert when ANY tier hits a new low at/below target.
+15. **Trends page** — per-watch price over time, by time of day, by day of week,
+    **cheapest day to fly**.
+16. **Close/archive** — `is_archived`, Past-watches section, "dates passed" flag.
+17. **Per-date capture** — `date_prices` (cheapest fare per departure date).
+
+---
+
+## 7. Key decisions & gotchas
+
+- **Prices are totals everywhere internally**; `target_price` is a total. UI/
+  alerts show **per-person** (÷ passengers) because that's how targets are set.
+- **Alert rule:** fire when a stop tier hits a **new all-time low for that tier**
+  AND is **at/below target**. Two gates prevent spam. Email+Slack fire together,
+  each in its own try/except.
+- **Flight times are airport-local** (Duffel returns local time) — do NOT convert
+  to viewer timezone; that's correct/expected. Trends time-of-day uses the
+  viewer's local tz (Anna = EST).
+- **Duffel:** charges per *booking*, not per *search* (searches free). Rate-limited
+  by speed (429s) — we throttle 0.3s/call + retry honoring `ratelimit-reset`.
+  **Stays not enabled** on the account.
+- **Duffel `total_amount` = all passengers** (a 2-pax fare ≈ 2× 1-pax).
+- **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
+  blanking all charts; currently `4.5.0`. Charts must build after layout
+  (DOMContentLoaded) or render 0-size.
+- **Booking:** FareWatch only *searches*; Anna books manually on Duffel (no
+  pre-fillable Duffel search URL exists — we show route/date/flight to copy).
+- **Storage:** ~1 MB used of 500 MB free; per-date capture adds ~15%/row. Years
+  of runway. Downsampling old data is the deferred safety net (not built yet).
+
+---
+
+## 8. Operational runbook
+
+- **Local dev:** `supabase start` → `python app.py` (127.0.0.1:5000, not
+  localhost) → `python check_prices.py`. `.env` points at the local stack + test
+  token. Stop with `supabase stop`.
+- **Run a check in prod:** Render → `farewatch-price-check` cron → **Run Now**.
+- **Clean sandbox data:** identify `price_history` rows with `airline='Duffel
+  Airways'` / `flight_number LIKE 'ZZ%'`.
+- **Tier/per-date data** only appears on rows checked *after* the relevant feature
+  deployed; older rows show "after next check" notes.
+
+---
+
+## 9. Current status & what's pending
+
+**Live in production:** flight monitoring, stops-aware email+Slack alerts, client
+pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
+usage page.
+
+**Pending / next:**
+- **Hotels** — `duffel_stays.py` + 2 API routes + tests were scoped (Session 10B)
+  but **blocked**: Duffel Stays returns "feature not enabled — contact sales."
+  Anna is contacting Duffel. (Alternative considered: Expedia Rapid/EPS API —
+  TAAP itself is a portal, not an API, so not usable.) Resume when enabled; the
+  correct endpoints are `/stays/accommodation/suggestions` + `POST /stays/search`
+  (NOT `/places/suggestions`, which is the flights endpoint).
+- **"Cheapest day to fly over time"** view on Trends — needs a week+ of
+  `date_prices` history to be meaningful.
+- **Downsampling** old `price_history` — build when storage approaches a threshold.
+- **Auto-close** past-date watches (currently a manual "close" button).
