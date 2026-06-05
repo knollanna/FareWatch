@@ -98,9 +98,14 @@ heads-up email so nothing fails silently.
   paused by the advisor), auto-refreshing, professionally branded.
 
 **Advisor dashboard**
-- All watches grouped by client, with at-a-glance metrics.
-- Add / edit / pause / resume / delete watches inline.
+- All watches grouped by client (soonest trip first within each), with
+  at-a-glance metrics.
+- Add / edit / pause / resume / delete watches inline — plus **close** a watch
+  once its trip is over (a "dates passed" flag prompts you), moving it to a
+  **Past watches** section where it keeps its history and can be reopened.
 - Price-history charts and a record of every alert sent.
+- A **Trends page**: per-watch price history, the **cheapest day to fly** in the
+  window, and how the fare varies by time of day and day of week.
 - A service-usage page tracking the tools FareWatch depends on.
 
 **History & trends**
@@ -121,14 +126,16 @@ heads-up email so nothing fails silently.
 
 ## Status & roadmap
 
-**Live today:** flight monitoring, email + Slack alerts, client status pages,
-price history, and the advisor dashboard — running in production.
+**Live today:** flight monitoring, stops-aware email + Slack alerts, client
+status pages, price history, a Trends page (incl. cheapest day to fly), and the
+advisor dashboard — running in production.
 
 **In progress:** hotel price monitoring (the database is ready; the hotel
 pricing integration is paused pending access to Duffel's Stays product).
 
-**Ideas for later:** richer price-trend analysis, and a more direct booking
-hand-off.
+**Ideas for later:** a "cheapest day to fly over time" view (now that per-date
+prices are being captured), automatic closing of past-date watches, and a more
+direct booking hand-off.
 
 ---
 

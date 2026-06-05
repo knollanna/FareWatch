@@ -62,7 +62,8 @@ FareWatch is two programs that share one database — they never call each other
 
 **Templates** (`templates/`) — `base.html` (layout), `login.html`, `index.html`
 (dashboard), `client.html` (public client page), `client_not_found.html`,
-`usage.html`, `add_watch.html`. Styling is one file: `static/style.css`.
+`usage.html`, `trends.html` (per-watch price trends), `add_watch.html`. Styling
+is one file: `static/style.css`.
 
 **One-off / utility scripts**
 - `prepare_airports.py` — downloads & filters the airport dataset into
@@ -85,16 +86,18 @@ FareWatch is two programs that share one database — they never call each other
 
 - **`watches`** — one row per flight watch: route, date window(s), passengers,
   `target_price` (stored as a **total** = per-person × passengers), trip type,
-  client name/email/token, `is_active` / `is_paused`, `last_error`, booking ref.
+  client name/email/token, `is_active` / `is_paused` / `is_archived` (closed/past),
+  `last_error`, booking ref.
 - **`price_history`** — one row per price check (on *every* check, not just
   alerts). Price + currency + `checked_at` + flight details (airline, flight
   numbers, departure/return times, stops, connections). Also records the
   cheapest fare at each **stop level** that check (`price_nonstop`,
   `price_1_stop`, `price_2_plus_stops`) — so a nonstop priced just above the
   cheapest connecting fare is no longer thrown away — plus `stop_tier_details`
-  (JSON: the winning fare's airline / flight numbers / dates / stops at each
-  tier, for the expandable fare-options table on each card). This is the dataset
-  behind the price charts and any future trend / stop-quality analysis.
+  (JSON, per-tier flight details for the expandable fare-options table) and
+  `date_prices` (JSON: cheapest fare per departure date in the window, for the
+  "cheapest day to fly" trend). This is the dataset behind the price charts, the
+  Trends page, and any future trend / stop-quality analysis.
 - **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric).
   Alerts fire per **stop tier**: when any of nonstop / 1-stop / 2+ hits a new low
   at/below the target (tracked against each tier's own price history), one
