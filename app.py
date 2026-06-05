@@ -507,6 +507,41 @@ def usage():
     return render_template("usage.html", usage=data)
 
 
+@app.route("/trends")
+@login_required
+def trends():
+    """Per-watch price trends. Pick a watch (?watch=<id>) and see its price
+    history plus how the cheapest fare varies by time of day and day of week.
+    Aggregation is done client-side; prices are shown per-person."""
+    watches = (
+        supabase.table("watches")
+        .select("id, origin, destination, client_name, date_from, date_to, passengers")
+        .eq("is_archived", False)
+        .order("date_from", desc=False)
+        .execute()
+        .data
+    )
+    selected_id = request.args.get("watch") or (watches[0]["id"] if watches else None)
+    selected_watch = next((w for w in watches if w["id"] == selected_id), None)
+
+    history = []
+    if selected_id:
+        history = (
+            supabase.table("price_history")
+            .select("checked_at, price, currency, price_nonstop, price_1_stop, price_2_plus_stops")
+            .eq("watch_id", selected_id)
+            .order("checked_at", desc=False)
+            .execute()
+            .data
+        )
+
+    return render_template("trends.html",
+                           watches=watches,
+                           selected_id=selected_id,
+                           selected_watch=selected_watch,
+                           history=history)
+
+
 if __name__ == "__main__":
     # Local dev server only. In production, gunicorn runs `app:app` (see Procfile).
     app.run(debug=False)

@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page">
+
+  <div class="section-heading" style="margin-bottom:16px;">price trends</div>
+
+  <!-- Watch selector -->
+  <form method="GET" action="/trends" style="margin-bottom:24px;">
+    <select name="watch" onchange="this.form.submit()"
+            style="padding:9px 12px;border:0.5px solid var(--border);border-radius:6px;font-size:14px;font-family:var(--font-sans);background:#fff;min-width:280px;">
+      {% for w in watches %}
+        <option value="{{ w.id }}" {{ 'selected' if w.id == selected_id }}>
+          {{ w.origin }} → {{ w.destination }} · {{ w.client_name }} · {{ w.date_from }}
+        </option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if not selected_watch %}
+    <p style="color:var(--muted);font-size:14px;">No watches to analyse yet.</p>
+  {% elif history|length < 2 %}
+    <p style="color:var(--muted);font-size:14px;">
+      Not enough price history yet for
+      <strong>{{ selected_watch.origin }} → {{ selected_watch.destination }}</strong>
+      — trends appear after a few price checks have run.
+    </p>
+  {% else %}
+
+    <!-- Summary stats -->
+    <div class="metrics" id="trend-stats" style="margin-bottom:28px;"></div>
+
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">
+      {{ history|length }} price checks recorded · prices shown
+      {{ 'per person' if selected_watch.passengers > 1 else '' }} · times in your local timezone
+    </div>
+
+    <!-- Price over time -->
+    <div class="metric-card" style="margin-bottom:20px;">
+      <div class="metric-label" style="margin-bottom:12px;">cheapest fare over time</div>
+      <div style="position:relative;height:240px;"><canvas id="chart-time"></canvas></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div class="metric-card">
+        <div class="metric-label" style="margin-bottom:12px;">average by time of day</div>
+        <div style="position:relative;height:220px;"><canvas id="chart-hour"></canvas></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label" style="margin-bottom:12px;">average by day of week</div>
+        <div style="position:relative;height:220px;"><canvas id="chart-dow"></canvas></div>
+      </div>
+    </div>
+
+    <p style="font-size:12px;color:var(--muted);margin-top:16px;">
+      Time-of-day and day-of-week patterns need a few weeks of data before they
+      mean much — they'll sharpen as history builds.
+    </p>
+
+    <script>
+      const HISTORY = {{ history|tojson }};
+      const PAX = {{ selected_watch.passengers }};
+      const ACCENT = '#1D9E75';
+      const pp = v => (v == null ? null : parseFloat(v) / PAX);
+
+      const prices = HISTORY.map(h => pp(h.price));
+      const times = HISTORY.map(h => new Date(h.checked_at));
+
+      // ── Summary stats ──
+      const valid = prices.filter(p => p != null);
+      const lo = Math.min(...valid), hi = Math.max(...valid);
+      const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+      const cur = valid[valid.length - 1];
+      const stat = (label, val, color) =>
+        `<div class="metric-card"><div class="metric-label">${label}</div>
+         <div class="metric-value" style="color:${color||'var(--text)'}">$${val.toFixed(0)}</div></div>`;
+      document.getElementById('trend-stats').innerHTML =
+        stat('current', cur) + stat('lowest seen', lo, ACCENT) +
+        stat('highest seen', hi, '#e05252') + stat('average', avg);
+
+      // ── Price over time ──
+      new Chart(document.getElementById('chart-time'), {
+        type: 'line',
+        data: {
+          labels: HISTORY.map(h => h.checked_at.slice(5, 16).replace('T', ' ')),
+          datasets: [{
+            data: prices, borderColor: ACCENT, backgroundColor: 'rgba(29,158,117,0.08)',
+            pointRadius: 2, tension: 0.3, fill: true, borderWidth: 2,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+                    x: { ticks: { font: { size: 10 }, maxTicksLimit: 8 } } }
+        }
+      });
+
+      // ── Aggregate helper: average price grouped by a key function ──
+      function avgBy(keyFn, keys) {
+        const buckets = {};
+        HISTORY.forEach((h, i) => {
+          if (prices[i] == null) return;
+          const k = keyFn(times[i]);
+          (buckets[k] = buckets[k] || []).push(prices[i]);
+        });
+        return keys.map(k => buckets[k] ? buckets[k].reduce((a, b) => a + b, 0) / buckets[k].length : null);
+      }
+
+      // ── By hour of day ──
+      const hourLabel = h => (h % 12 || 12) + (h < 12 ? 'am' : 'pm');
+      const hoursPresent = [...new Set(times.map(t => t.getHours()))].sort((a, b) => a - b);
+      new Chart(document.getElementById('chart-hour'), {
+        type: 'bar',
+        data: {
+          labels: hoursPresent.map(hourLabel),
+          datasets: [{ data: avgBy(t => t.getHours(), hoursPresent), backgroundColor: ACCENT }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+                    x: { ticks: { font: { size: 11 } } } }
+        }
+      });
+
+      // ── By day of week ──
+      const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      new Chart(document.getElementById('chart-dow'), {
+        type: 'bar',
+        data: {
+          labels: DOW,
+          datasets: [{ data: avgBy(t => t.getDay(), [0,1,2,3,4,5,6]), backgroundColor: '#7aa7c7' }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+                    x: { ticks: { font: { size: 11 } } } }
+        }
+      });
+    </script>
+
+  {% endif %}
+</div>
+{% endblock %}
