@@ -126,7 +126,7 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
     Search for flights across a date range.
     For round-trip, also loops over return dates to find the best combination.
 
-    Returns (price, currency, flight_details, error, stop_tiers):
+    Returns (price, currency, flight_details, error, stop_tiers, date_prices):
       * price/currency/flight_details — the overall cheapest fare (unchanged).
       * error — None on success/genuinely-no-flights, or a message on API failure.
       * stop_tiers — the cheapest fare at each stop level found anywhere in the
@@ -134,6 +134,8 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
         each float or None) plus "details" — a dict keyed "nonstop"/"1_stop"/
         "2_plus" with that tier's winning flight details (airline, flight numbers,
         dates, stops, connections) or None.
+      * date_prices — {outbound_date: cheapest_total} for every departure date in
+        the window (for round-trips, cheapest across return dates).
     """
     empty_tiers = {
         "price_nonstop": None, "price_1_stop": None, "price_2_plus_stops": None,
@@ -143,7 +145,7 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
         start = datetime.date.fromisoformat(date_from)
         end = datetime.date.fromisoformat(date_to)
     except ValueError:
-        return None, None, None, f"Invalid dates: {date_from} / {date_to}", empty_tiers
+        return None, None, None, f"Invalid dates: {date_from} / {date_to}", empty_tiers, {}
 
     # Build list of return dates for round-trip
     return_dates = []
@@ -156,13 +158,14 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
                 return_dates.append(str(r))
                 r += datetime.timedelta(days=1)
         except ValueError:
-            return None, None, None, f"Invalid return dates: {return_date_from} / {return_date_to}", empty_tiers
+            return None, None, None, f"Invalid return dates: {return_date_from} / {return_date_to}", empty_tiers, {}
 
     lowest_price = None
     lowest_currency = None
     lowest_details = None
     last_error = None
-    agg_tiers = {}  # stop bucket (0/1/2) -> cheapest price seen across the window
+    agg_tiers = {}    # stop bucket (0/1/2) -> cheapest price seen across the window
+    date_prices = {}  # outbound date (str) -> cheapest fare departing that day
 
     current = start
     while current <= end:
@@ -173,10 +176,15 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
             )
             if err:
                 last_error = err
-            if price is not None and (lowest_price is None or price < lowest_price):
-                lowest_price = price
-                lowest_currency = currency
-                lowest_details = details
+            if price is not None:
+                # Cheapest fare departing on this outbound date (across return dates)
+                ds = str(current)
+                if ds not in date_prices or price < date_prices[ds]:
+                    date_prices[ds] = price
+                if lowest_price is None or price < lowest_price:
+                    lowest_price = price
+                    lowest_currency = currency
+                    lowest_details = details
             # Merge this date's per-tier cheapest into the running aggregate
             for bucket, entry in (date_tiers or {}).items():
                 if bucket not in agg_tiers or entry["price"] < agg_tiers[bucket]["price"]:
@@ -216,9 +224,9 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
     # If we found nothing AND hit an API error, surface the error.
     # If we found nothing with no errors, that's a genuine "no flights".
     if lowest_price is None:
-        return None, None, None, last_error, stop_tiers
+        return None, None, None, last_error, stop_tiers, date_prices
 
-    return lowest_price, lowest_currency, lowest_details, None, stop_tiers
+    return lowest_price, lowest_currency, lowest_details, None, stop_tiers, date_prices
 
 
 def _search_single_date(origin, destination, departure_date, passengers, return_date=None):

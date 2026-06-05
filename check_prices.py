@@ -113,7 +113,7 @@ def check_all_watches():
         trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
         print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
-        price, currency, flight_details, fetch_error, stop_tiers = get_lowest_fare(
+        price, currency, flight_details, fetch_error, stop_tiers, date_prices = get_lowest_fare(
             origin=watch["origin"],
             destination=watch["destination"],
             date_from=watch["date_from"],
@@ -159,6 +159,8 @@ def check_all_watches():
             # Winning flight details at each tier (airline/dates/stops), for the
             # expandable tier table in the UI
             "stop_tier_details": stop_tiers.get("details"),
+            # Cheapest fare per departure date in the window (trend distribution)
+            "date_prices": date_prices or None,
         }
         if flight_details:
             history_row["stops_outbound"] = flight_details.get("stops_outbound")
