@@ -34,6 +34,13 @@
       {{ 'per person' if selected_watch.passengers > 1 else '' }} · times in your local timezone
     </div>
 
+    <!-- Cheapest fare by departure date (current snapshot) -->
+    <div class="metric-card" style="margin-bottom:20px;">
+      <div class="metric-label" style="margin-bottom:4px;">cheapest fare by departure date</div>
+      <div id="cheapest-day-note" style="font-size:13px;color:var(--accent);font-weight:600;margin-bottom:12px;"></div>
+      <div id="chart-date-wrap" style="position:relative;height:220px;"><canvas id="chart-date"></canvas></div>
+    </div>
+
     <!-- Price over time -->
     <div class="metric-card" style="margin-bottom:20px;">
       <div class="metric-label" style="margin-bottom:12px;">cheapest fare over time</div>
@@ -95,6 +102,36 @@
                     x: { ticks: { font: { size: 10 }, maxTicksLimit: 8 } } }
         }
       });
+
+      // ── Cheapest fare by departure date (latest check's snapshot) ──
+      const dpRows = HISTORY.filter(h => h.date_prices);
+      const dateNote = document.getElementById('cheapest-day-note');
+      const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      if (!dpRows.length) {
+        dateNote.textContent = 'Per-date data collects from the next price check onward.';
+        dateNote.style.color = 'var(--muted)';
+        dateNote.style.fontWeight = '400';
+        document.getElementById('chart-date-wrap').style.display = 'none';
+      } else {
+        const latest = dpRows[dpRows.length - 1].date_prices;
+        const dates = Object.keys(latest).sort();
+        const vals = dates.map(d => pp(latest[d]));
+        const minVal = Math.min(...vals);
+        const minDate = dates[vals.indexOf(minVal)];
+        dateNote.textContent = '🟢 cheapest day to fly right now: ' + fmtDate(minDate) +
+          ' — $' + minVal.toFixed(0) + (PAX > 1 ? '/person' : '');
+        new Chart(document.getElementById('chart-date'), {
+          type: 'bar',
+          data: { labels: dates.map(fmtDate),
+            datasets: [{ data: vals, backgroundColor: dates.map(d => d === minDate ? ACCENT : '#b9ddcd') }] },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+                      x: { ticks: { font: { size: 11 } } } }
+          }
+        });
+      }
 
       // ── Aggregate helper: average price grouped by a key function ──
       function avgBy(keyFn, keys) {

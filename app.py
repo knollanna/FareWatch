@@ -528,7 +528,7 @@ def trends():
     if selected_id:
         history = (
             supabase.table("price_history")
-            .select("checked_at, price, currency, price_nonstop, price_1_stop, price_2_plus_stops")
+            .select("checked_at, price, currency, price_nonstop, price_1_stop, price_2_plus_stops, date_prices")
             .eq("watch_id", selected_id)
             .order("checked_at", desc=False)
             .execute()
