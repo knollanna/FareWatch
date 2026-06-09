@@ -68,7 +68,10 @@ shared password + anon key).
   `price_1_stop`, `price_2_plus_stops`), `stop_tier_details` (JSONB: per-tier
   flight details), `date_prices` (JSONB: cheapest fare per departure date).
 - **`sent_alerts`** — log of alerts (`watch_id`, `price`, `sent_at`,
-  `hotel_watch_id`).
+  `hotel_watch_id`, plus `alerted_price_nonstop` / `alerted_price_1_stop` /
+  `alerted_price_2_plus_stops`). The per-tier `alerted_price_*` columns record
+  what each **successful** alert went out at and are the alert **dedup baseline**
+  (see §7) — added 2026-06-09 to fix the swallow bug.
 - **`hotel_watches`**, **`hotel_price_history`** — built, **unused** (Stays
   blocked). `sent_alerts.hotel_watch_id` links to them.
 
@@ -101,6 +104,8 @@ Details in `supabase/README.md`. Local stack needs Docker Desktop running.
 **Deploy:** push to `main` → Render auto-deploys both web + cron. Free-tier web
 spins down after ~15 min idle (cold start on next visit) — normal, and the cron
 runs independently. No per-spin-up charge; metered on instance-hours (free 750/mo).
+Python is pinned to **3.14.5** via `PYTHON_VERSION` in `render.yaml` (both
+services), matching the local `.venv`.
 
 **Env vars:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DUFFEL_API_TOKEN`,
 `SENDGRID_API_KEY`, `SENDER_EMAIL`, `SLACK_WEBHOOK_URL`, `BASE_URL`,
@@ -133,6 +138,14 @@ currently `REDACTED`.
     **cheapest day to fly**.
 16. **Close/archive** — `is_archived`, Past-watches section, "dates passed" flag.
 17. **Per-date capture** — `date_prices` (cheapest fare per departure date).
+18. **Alert reliability & Duffel rate-limit fixes (2026-06-09)** — (a) alert dedup
+    baseline moved from `price_history` to `sent_alerts.alerted_price_*`, so a
+    failed email/Slack send is **retried** next run instead of being swallowed;
+    (b) fixed the Duffel 429 backoff — `ratelimit-reset` is an RFC 2616 **HTTP
+    date**, not a number; the old `float()` parse silently fell back to a ~1s wait
+    so retries never waited out the window and failed; (c) call spacing 0.3s→0.6s
+    to stay under the 120 req/60s search limit. Also: Render Python pinned to
+    3.14.5; add-watch target label corrected to "per person".
 
 ---
 
@@ -140,9 +153,15 @@ currently `REDACTED`.
 
 - **Prices are totals everywhere internally**; `target_price` is a total. UI/
   alerts show **per-person** (÷ passengers) because that's how targets are set.
-- **Alert rule:** fire when a stop tier hits a **new all-time low for that tier**
-  AND is **at/below target**. Two gates prevent spam. Email+Slack fire together,
-  each in its own try/except.
+- **Alert rule:** fire when a stop tier is **at/below target** AND beats the
+  **lowest price we've successfully ALERTED for that tier** — the dedup baseline,
+  read from `sent_alerts.alerted_price_*` (via `get_alerted_tier_lows`), **NOT**
+  from `price_history`. Key gotcha (the 2026-06-09 swallow-bug fix): basing the
+  baseline on *sent* alerts means a failed send records nothing in `sent_alerts`
+  and is retried next run, instead of `price_history` advancing the baseline and
+  silently swallowing the alert. Two gates prevent spam. Email+Slack fire together,
+  each in its own try/except; `sent_alerts` is written **only if** at least one
+  channel succeeds (that's what makes the retry work).
 - **Flight times are airport-local** (Duffel returns local time) — do NOT convert
   to viewer timezone; that's correct/expected. Trends time-of-day uses the
   viewer's local tz (Anna = EST).
@@ -183,7 +202,9 @@ usage page.
 **Pending / next:**
 - **Hotels** — `duffel_stays.py` + 2 API routes + tests were scoped (Session 10B)
   but **blocked**: Duffel Stays returns "feature not enabled — contact sales."
-  Anna is contacting Duffel. (Alternative considered: Expedia Rapid/EPS API —
+  Anna re-sent the Duffel contact-us access request on 2026-06-09 (awaiting
+  reply); a token's read/write setting does NOT grant Stays — it's an account-
+  level entitlement Duffel enables. (Alternative considered: Expedia Rapid/EPS API —
   TAAP itself is a portal, not an API, so not usable.) Resume when enabled; the
   correct endpoints are `/stays/accommodation/suggestions` + `POST /stays/search`
   (NOT `/places/suggestions`, which is the flights endpoint).
