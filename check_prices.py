@@ -48,16 +48,26 @@ def get_previous_lowest(watch_id):
     return None
 
 
-def get_previous_tier_lows(watch_id):
-    """Lowest price ever recorded at each stop tier for this watch.
+def get_alerted_tier_lows(watch_id):
+    """Lowest price at each stop tier we have SUCCESSFULLY ALERTED for this watch.
 
-    Returns {"nonstop", "1_stop", "2_plus"} -> float or None. Must be called
-    BEFORE inserting the current check's row, so the new row isn't counted as
-    its own previous low (which would suppress the alert).
+    Reads sent_alerts, whose rows are written ONLY when an alert actually goes
+    out (email or Slack). Basing the dedup baseline here — rather than on
+    price_history, which records every check — means a failed send never advances
+    the baseline, so the alert is retried on the next check instead of being
+    silently swallowed.
+
+    Returns {"nonstop", "1_stop", "2_plus"} -> float or None.
     """
+    cols = {
+        "nonstop": "alerted_price_nonstop",
+        "1_stop": "alerted_price_1_stop",
+        "2_plus": "alerted_price_2_plus_stops",
+    }
+
     def tier_min(col):
         r = (
-            supabase.table("price_history")
+            supabase.table("sent_alerts")
             .select(col)
             .eq("watch_id", watch_id)
             .not_.is_(col, "null")
@@ -68,11 +78,7 @@ def get_previous_tier_lows(watch_id):
         )
         return float(r[0][col]) if r else None
 
-    return {
-        "nonstop": tier_min("price_nonstop"),
-        "1_stop": tier_min("price_1_stop"),
-        "2_plus": tier_min("price_2_plus_stops"),
-    }
+    return {k: tier_min(c) for k, c in cols.items()}
 
 
 def set_error(watch_id, message):
@@ -143,9 +149,10 @@ def check_all_watches():
         # Successful check — clear any previous error
         clear_error(watch["id"])
 
-        # Capture each tier's previous low BEFORE inserting this check's row, so
-        # the new row isn't counted as its own "previous low".
-        prev_tier_lows = get_previous_tier_lows(watch["id"])
+        # Baseline = the lowest price we've actually ALERTED at each tier (from
+        # sent_alerts). A check that fails to send never updates this, so the
+        # alert is retried next run rather than swallowed.
+        prev_tier_lows = get_alerted_tier_lows(watch["id"])
 
         # Save to price_history
         history_row = {
@@ -201,6 +208,8 @@ def check_all_watches():
                     "price": cur,
                     "previous_low": prev,
                     "detail": tier_details.get(detail_key),
+                    # Column on sent_alerts to record this tier's alerted price.
+                    "alerted_col": f"alerted_{price_key}",
                 })
 
         if improved:
@@ -225,12 +234,15 @@ def check_all_watches():
             except Exception as e:
                 print(f"  💬 Slack failed: {e}")
 
-            # Record the alert event if either channel fired
+            # Record the alert event if either channel fired. Storing the per-tier
+            # alerted prices is what advances the dedup baseline (see
+            # get_alerted_tier_lows) — so a fully-failed send records nothing and
+            # the alert is retried next run.
             if email_ok or slack_ok:
-                supabase.table("sent_alerts").insert({
-                    "watch_id": watch["id"],
-                    "price": price,
-                }).execute()
+                alert_row = {"watch_id": watch["id"], "price": price}
+                for t in improved:
+                    alert_row[t["alerted_col"]] = t["price"]
+                supabase.table("sent_alerts").insert(alert_row).execute()
         elif price <= target:
             print(f"  at/below target but no tier hit a new low — skipping.")
 
