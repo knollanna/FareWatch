@@ -26,7 +26,7 @@ services:
       - key: RENDER_API_KEY
         sync: false
       - key: PYTHON_VERSION
-        value: 3.13.0
+        value: 3.14.5
 
   # --- Price checker cron job (every 2 hours, 24/7 for trend data) ---
   - type: cron
@@ -51,3 +51,5 @@ services:
         sync: false
       - key: BASE_URL
         value: https://farewatch.annaknoll.com
+      - key: PYTHON_VERSION
+        value: 3.14.5
