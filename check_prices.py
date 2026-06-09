@@ -48,7 +48,7 @@ def get_previous_lowest(watch_id):
     return None
 
 
-def get_alerted_tier_lows(watch_id):
+def get_alerted_tier_lows(watch_id, params_changed_at=None):
     """Lowest price at each stop tier we have SUCCESSFULLY ALERTED for this watch.
 
     Reads sent_alerts, whose rows are written ONLY when an alert actually goes
@@ -56,6 +56,11 @@ def get_alerted_tier_lows(watch_id):
     price_history, which records every check — means a failed send never advances
     the baseline, so the alert is retried on the next check instead of being
     silently swallowed.
+
+    If params_changed_at is set (the watch's trip was materially edited), only
+    alerts sent at/after that point count, so the new trip starts with a fresh
+    baseline instead of inheriting the old trip's lows (which may not even be
+    comparable, e.g. after a passenger-count change).
 
     Returns {"nonstop", "1_stop", "2_plus"} -> float or None.
     """
@@ -66,16 +71,15 @@ def get_alerted_tier_lows(watch_id):
     }
 
     def tier_min(col):
-        r = (
+        q = (
             supabase.table("sent_alerts")
             .select(col)
             .eq("watch_id", watch_id)
             .not_.is_(col, "null")
-            .order(col, desc=False)
-            .limit(1)
-            .execute()
-            .data
         )
+        if params_changed_at:
+            q = q.gte("sent_at", params_changed_at)
+        r = q.order(col, desc=False).limit(1).execute().data
         return float(r[0][col]) if r else None
 
     return {k: tier_min(c) for k, c in cols.items()}
@@ -152,7 +156,7 @@ def check_all_watches():
         # Baseline = the lowest price we've actually ALERTED at each tier (from
         # sent_alerts). A check that fails to send never updates this, so the
         # alert is retried next run rather than swallowed.
-        prev_tier_lows = get_alerted_tier_lows(watch["id"])
+        prev_tier_lows = get_alerted_tier_lows(watch["id"], watch.get("params_changed_at"))
 
         # Save to price_history
         history_row = {

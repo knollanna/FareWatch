@@ -105,14 +105,34 @@ def _stops_text(lp, trip_type):
     return f"out {leg(so, out_conns)} · ret {leg(si, in_conns)}"
 
 
+# Fields that define which trip a watch tracks. Editing any of these starts a
+# fresh history epoch (params_changed_at) so old-trip prices don't pollute the
+# chart/Trends/alert baseline — see the add_params_changed_at migration.
+MATERIAL_WATCH_FIELDS = (
+    "origin", "destination", "date_from", "date_to",
+    "return_date_from", "return_date_to", "passengers",
+)
+
+
+def _since_params_change(query, params_changed_at):
+    """Restrict a price_history query to the current trip epoch (rows recorded at
+    or after the last material edit). Watches never edited have NULL → no filter."""
+    if params_changed_at:
+        query = query.gte("checked_at", params_changed_at)
+    return query
+
+
 def _attach_watch_extras(watches):
     """Attach latest_price and alert_sent_today to each watch dict."""
     today = datetime.date.today().isoformat()
     for watch in watches:
-        latest = (
+        latest_q = (
             supabase.table("price_history")
             .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at, returning_at, return_flight_number, price_nonstop, price_1_stop, price_2_plus_stops, stop_tier_details")
             .eq("watch_id", watch["id"])
+        )
+        latest = (
+            _since_params_change(latest_q, watch.get("params_changed_at"))
             .order("checked_at", desc=True)
             .limit(1)
             .execute()
@@ -363,6 +383,15 @@ def edit_watch(watch_id):
         "return_date_from": request.form.get("return_date_from") or None,
         "return_date_to": request.form.get("return_date_to") or None,
     }
+    # If the trip itself changed (route/dates/passengers), start a new history
+    # epoch so the old trip's prices don't blend into the new one's chart/alerts.
+    current = (
+        supabase.table("watches")
+        .select(",".join(MATERIAL_WATCH_FIELDS))
+        .eq("id", watch_id).limit(1).execute().data
+    )
+    if current and any(str(current[0].get(f)) != str(updates.get(f)) for f in MATERIAL_WATCH_FIELDS):
+        updates["params_changed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     supabase.table("watches").update(updates).eq("id", watch_id).execute()
     flash("Watch updated.")
     return redirect(url_for("index"))
@@ -444,12 +473,22 @@ def deactivate_watch(watch_id):
 
 @app.route("/history/<watch_id>")
 def watch_history(watch_id):
-    """Return this watch's full price history as JSON (oldest→newest) for the
-    inline Chart.js price chart."""
-    rows = (
+    """Return this watch's price history as JSON (oldest→newest) for the inline
+    Chart.js price chart — limited to the current trip epoch (see
+    params_changed_at) so an edited watch doesn't blend two trips on one line."""
+    w = (
+        supabase.table("watches")
+        .select("params_changed_at")
+        .eq("id", watch_id).limit(1).execute().data
+    )
+    pca = w[0]["params_changed_at"] if w else None
+    q = (
         supabase.table("price_history")
         .select("price, currency, checked_at, stops_outbound, stops_inbound")
         .eq("watch_id", watch_id)
+    )
+    rows = (
+        _since_params_change(q, pca)
         .order("checked_at", desc=False)
         .execute()
         .data
@@ -475,10 +514,13 @@ def client_page(token):
 
     # Attach latest price to each watch
     for watch in watches:
-        latest = (
+        latest_q = (
             supabase.table("price_history")
             .select("price, currency, checked_at, stops_outbound, stops_inbound, connection_airports, airline, flight_number, departing_at, returning_at, return_flight_number, price_nonstop, price_1_stop, price_2_plus_stops, stop_tier_details")
             .eq("watch_id", watch["id"])
+        )
+        latest = (
+            _since_params_change(latest_q, watch.get("params_changed_at"))
             .order("checked_at", desc=True)
             .limit(1)
             .execute()
@@ -515,7 +557,7 @@ def trends():
     Aggregation is done client-side; prices are shown per-person."""
     watches = (
         supabase.table("watches")
-        .select("id, origin, destination, client_name, date_from, date_to, passengers")
+        .select("id, origin, destination, client_name, date_from, date_to, passengers, params_changed_at")
         .eq("is_archived", False)
         .order("date_from", desc=False)
         .execute()
@@ -526,10 +568,13 @@ def trends():
 
     history = []
     if selected_id:
-        history = (
+        history_q = (
             supabase.table("price_history")
             .select("checked_at, price, currency, price_nonstop, price_1_stop, price_2_plus_stops, date_prices")
             .eq("watch_id", selected_id)
+        )
+        history = (
+            _since_params_change(history_q, selected_watch and selected_watch.get("params_changed_at"))
             .order("checked_at", desc=False)
             .execute()
             .data

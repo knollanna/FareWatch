@@ -60,7 +60,8 @@ shared password + anon key).
 - **`watches`** — `origin`, `destination`, `date_from`, `date_to`, `passengers`,
   `target_price` (**stored as TOTAL** = per-person × passengers), `trip_type`,
   `return_date_from/to`, `client_name/email/token`, `is_active`, `is_paused`,
-  `is_archived` (closed/past), `last_error`, `booking_reference`, `booked_at`.
+  `is_archived` (closed/past), `last_error`, `booking_reference`, `booked_at`,
+  `params_changed_at` (set when a *material* edit changes the trip — see §7).
 - **`price_history`** — one row per check: `price` (overall cheapest total),
   `currency`, `checked_at`, flight details (`airline`, `flight_number`,
   `departing_at`, `returning_at`, `return_flight_number`, `stops_outbound`,
@@ -146,6 +147,12 @@ currently `REDACTED`.
     so retries never waited out the window and failed; (c) call spacing 0.3s→0.6s
     to stay under the 120 req/60s search limit. Also: Render Python pinned to
     3.14.5; add-watch target label corrected to "per person".
+19. **Edit-aware history epochs (2026-06-09)** — editing a watch's trip-identity
+    fields (origin, destination, date windows, passengers) sets `params_changed_at`;
+    history chart, sparkline, Trends, and the alert baseline all filter to rows at/
+    after it, so an edited watch no longer blends two trips (critical for passenger
+    changes, where totals aren't comparable). Old rows are kept, just not shown as
+    current. Non-material edits (target, client name/email) don't bump the epoch.
 
 ---
 
@@ -162,6 +169,14 @@ currently `REDACTED`.
   silently swallowing the alert. Two gates prevent spam. Email+Slack fire together,
   each in its own try/except; `sent_alerts` is written **only if** at least one
   channel succeeds (that's what makes the retry work).
+- **Editing a watch = possible new history epoch.** `edit_watch` bumps
+  `watches.params_changed_at` only when a *material* field changes (route, date
+  windows, passengers — `MATERIAL_WATCH_FIELDS` in app.py). All history reads
+  (`/history`, sparkline via `_attach_watch_extras`, client page, Trends) and the
+  alert baseline (`get_alerted_tier_lows`) filter to `>= params_changed_at` via
+  `_since_params_change`, so old-trip prices don't pollute the current trip. NULL
+  = never edited → no filter. Right after a material edit the card shows "no price
+  yet" until the next check writes a row in the new epoch — expected.
 - **Flight times are airport-local** (Duffel returns local time) — do NOT convert
   to viewer timezone; that's correct/expected. Trends time-of-day uses the
   viewer's local tz (Anna = EST).
