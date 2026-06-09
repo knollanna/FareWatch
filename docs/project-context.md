@@ -147,7 +147,8 @@ currently `REDACTED`.
   to viewer timezone; that's correct/expected. Trends time-of-day uses the
   viewer's local tz (Anna = EST).
 - **Duffel:** charges per *booking*, not per *search* (searches free). Rate-limited
-  by speed (429s) — we throttle 0.3s/call + retry honoring `ratelimit-reset`.
+  by speed (429s, limit 120 req/60s) — we throttle 0.6s/call (~100/min) + retry
+  honoring `ratelimit-reset` (an RFC 2616 **HTTP date**, not a number/timestamp).
   **Stays not enabled** on the account.
 - **Duffel `total_amount` = all passengers** (a 2-pax fare ≈ 2× 1-pax).
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),

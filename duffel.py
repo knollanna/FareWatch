@@ -20,6 +20,7 @@ This module is flights-only. Hotels live in `duffel_stays.py` (separate file).
 import os
 import time
 import datetime
+from email.utils import parsedate_to_datetime
 import requests
 from dotenv import load_dotenv
 
@@ -38,6 +39,38 @@ def _headers():
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
+
+def _retry_wait_seconds(reset_header):
+    """Seconds to wait before retrying after a 429, from Duffel's `ratelimit-reset`.
+
+    Duffel sends ratelimit-reset as an RFC 2616 HTTP date (e.g.
+    'Wed, 09 Jun 2026 12:00:00 GMT') — NOT a number — and asks you to retry after
+    that time. We parse it as a date and wait until then (+1s buffer). If that
+    fails we fall back to a numeric reading (Unix epoch if large, else
+    delta-seconds) and finally a small default, so a header-format change can
+    never collapse the backoff to ~0 and make us hammer the API (the old bug).
+    Clamped to [0.5s, 65s] — the search limit window is 120 requests / 60s.
+    """
+    if not reset_header:
+        return 1.0
+    wait = None
+    try:  # primary: HTTP date string
+        reset_dt = parsedate_to_datetime(reset_header)
+        if reset_dt is not None:
+            if reset_dt.tzinfo is None:
+                reset_dt = reset_dt.replace(tzinfo=datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            wait = (reset_dt - now).total_seconds() + 1.0  # small buffer past reset
+    except (TypeError, ValueError):
+        wait = None
+    if wait is None:  # fallback: numeric (Unix epoch if large, else delta-seconds)
+        try:
+            val = float(reset_header)
+            wait = (val - time.time()) if val > 1e6 else val
+        except (TypeError, ValueError):
+            wait = 1.0
+    return min(max(wait, 0.5), 65.0)
 
 
 def _extract_slice_stops(slice_data):
@@ -189,8 +222,10 @@ def get_lowest_fare(origin, destination, date_from, date_to, passengers,
             for bucket, entry in (date_tiers or {}).items():
                 if bucket not in agg_tiers or entry["price"] < agg_tiers[bucket]["price"]:
                     agg_tiers[bucket] = entry
-            # Gentle spacing between calls to stay under Duffel's rate limit
-            time.sleep(0.3)
+            # Spacing between calls to stay under Duffel's search limit of
+            # 120 requests / 60s. 0.6s ≈ 100/min, leaving headroom; the older
+            # 0.3s (~200/min) overran the limit and tripped 429s mid-run.
+            time.sleep(0.6)
         current += datetime.timedelta(days=1)
 
     def _tier_detail(entry):
@@ -264,15 +299,9 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
         except requests.exceptions.RequestException as e:
             return None, None, None, f"Network error reaching Duffel: {e}", None
 
-        # Rate limited — honor the reset header and retry
+        # Rate limited — wait until the reset time Duffel gives us, then retry
         if response.status_code == 429:
-            reset = response.headers.get("ratelimit-reset")
-            try:
-                # ratelimit-reset is a Unix timestamp, not a duration
-                wait = max(float(reset) - time.time(), 0.5) if reset else 1.0
-            except (TypeError, ValueError):
-                wait = 1.0
-            wait = min(wait, 30.0)  # clamp to a sane ceiling
+            wait = _retry_wait_seconds(response.headers.get("ratelimit-reset"))
             if attempt < max_retries:
                 print(f"  [duffel] Rate limited on {departure_date}, waiting {wait:.1f}s "
                       f"(retry {attempt + 1}/{max_retries})...")
