@@ -184,8 +184,9 @@ currently `REDACTED`.
   dashboard tab submitting against old page state) returns Werkzeug's raw 405.
   Confirmed 2026-06-09: server + form markup were correct (a full POST → 302), and
   a **hard refresh (Cmd+Shift+R) fixed it**. Diagnose with the failing request's
-  Method+URL in DevTools, or test in Incognito (rules out extensions/cache). A
-  graceful GET→dashboard redirect on these routes is a possible hardening (not built).
+  Method+URL in DevTools, or test in Incognito (rules out extensions/cache).
+  Hardened 2026-06-09: an `@app.errorhandler(405)` now redirects any such GET to
+  the dashboard (→ /login if unauthed) instead of showing the raw 405 page.
 - **Flight times are airport-local** (Duffel returns local time) — do NOT convert
   to viewer timezone; that's correct/expected. Trends time-of-day uses the
   viewer's local tz (Anna = EST).
