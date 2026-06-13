@@ -177,6 +177,15 @@ currently `REDACTED`.
   `_since_params_change`, so old-trip prices don't pollute the current trip. NULL
   = never edited → no filter. Right after a material edit the card shows "no price
   yet" until the next check writes a row in the new epoch — expected.
+- **"Method Not Allowed" (405) on edit/save is almost always a STALE BROWSER
+  CACHE, not a server bug.** The action routes (`/edit`, `/pause`, `/archive`,
+  `/delete`, `/book`, `/resume`, `/unarchive`) are **POST-only**, so any *GET* to
+  them (a refresh/back-button/bookmark onto an `/edit/<id>` URL, or a stale cached
+  dashboard tab submitting against old page state) returns Werkzeug's raw 405.
+  Confirmed 2026-06-09: server + form markup were correct (a full POST → 302), and
+  a **hard refresh (Cmd+Shift+R) fixed it**. Diagnose with the failing request's
+  Method+URL in DevTools, or test in Incognito (rules out extensions/cache). A
+  graceful GET→dashboard redirect on these routes is a possible hardening (not built).
 - **Flight times are airport-local** (Duffel returns local time) — do NOT convert
   to viewer timezone; that's correct/expected. Trends time-of-day uses the
   viewer's local tz (Anna = EST).
