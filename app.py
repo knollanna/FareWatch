@@ -46,6 +46,17 @@ supabase: Client = create_client(
 APP_PASSWORD = os.environ["APP_PASSWORD"]
 
 
+@app.errorhandler(405)
+def method_not_allowed(_e):
+    """The action routes (/edit, /pause, /archive, /delete, /book, /resume,
+    /unarchive) are POST-only. A GET to one — a refresh/back-button/bookmark onto
+    an /edit/<id> URL, or a stale cached tab submitting against old page state —
+    would otherwise show Werkzeug's raw 'Method Not Allowed' page. Quietly send
+    the user back to the dashboard instead (which itself redirects to /login if
+    they're not authenticated)."""
+    return redirect(url_for("index"))
+
+
 def login_required(f):
     """Decorator: redirect to /login unless the session is authenticated.
 
