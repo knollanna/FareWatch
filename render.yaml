@@ -13,6 +13,8 @@ services:
         sync: false
       - key: DUFFEL_API_TOKEN
         sync: false
+      - key: LITEAPI_KEY
+        sync: false
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDER_EMAIL
@@ -42,6 +44,8 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: DUFFEL_API_TOKEN
+        sync: false
+      - key: LITEAPI_KEY
         sync: false
       - key: SENDGRID_API_KEY
         sync: false

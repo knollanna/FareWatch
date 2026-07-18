@@ -16,7 +16,10 @@ checks Duffel every 2 hours, records prices, and emails + Slacks her (and the
 client) when a fare hits target. Each client gets a private link to a live
 status page. Deployed at **farewatch.annaknoll.com**.
 
-Hotels are planned but **blocked** (see §9).
+**Hotels** now work too — same idea (watch a specific hotel + dates, alert when
+the nightly rate drops under target), built on **LiteAPI** after Duffel Stays
+turned out to be sales-gated (see §6/§9). Advisor-facing side is done; client-
+facing hotel display is the last pending piece.
 
 ---
 
@@ -27,10 +30,11 @@ Two programs sharing one database — they never call each other:
 | Part | Files | Runs | Job |
 |---|---|---|---|
 | **Web app** | `app.py` + `templates/` | always-on (gunicorn on Render) | admin dashboard + public client pages |
-| **Price checker** | `check_prices.py` | Render cron, **every 2h, 24/7** (`0 */2 * * *`) | search Duffel, store prices, send alerts |
+| **Price checker** | `check_prices.py` | Render cron, **every 2h, 24/7** (`0 */2 * * *`) | check flights (Duffel) **then** hotels (LiteAPI), store prices, send alerts |
 
-External services: **Duffel** (flight fares), **SendGrid** (email), **Slack**
-(webhook), **Supabase/Postgres** (DB), **Render** (hosting).
+External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
+**SendGrid** (email), **Slack** (webhook), **Supabase/Postgres** (DB), **Render**
+(hosting).
 
 ---
 
@@ -39,15 +43,21 @@ External services: **Duffel** (flight fares), **SendGrid** (email), **Slack**
 - `app.py` — Flask: login, dashboard (`/`), add/edit/pause/resume/**archive**/
   delete, `/history/<id>` (JSON for charts, **public** so client pages work),
   `/client/<token>` (public client page), `/usage`, `/trends`.
-- `check_prices.py` — the cron. Fetches fares, writes `price_history`, fires alerts.
+- `check_prices.py` — the cron. Checks flights **then** hotels; writes
+  `price_history` / `hotel_price_history`, fires alerts (swallow-safe).
 - `duffel.py` — flights. `get_lowest_fare(...)` returns `(price, currency,
   flight_details, error, stop_tiers, date_prices)`. Handles rate limits.
-- `alerts.py` — email (SendGrid) + Slack (Block Kit) + internal error email.
+- `hotel_prices.py` — hotels (LiteAPI). `get_lowest_hotel_rate(hotel_id, dates,
+  guests, rooms, refundable_only)` → `(rate, error)` shaped for `hotel_price_history`;
+  `find_hotels(city, country)` → hotel IDs for the add-watch picker.
+- `alerts.py` — email (SendGrid) + Slack (Block Kit) + error emails, for flights
+  **and** hotels (`send_hotel_alert` / `send_hotel_slack_alert` / `send_hotel_error_alert`).
 - `usage.py` — `/usage` page (SendGrid/Duffel/Supabase/Render metrics).
-- `duffel_stays.py` — **not built** (hotels, blocked).
-- Templates: `base.html`, `index.html` (dashboard), `client.html`, `usage.html`,
-  `trends.html`, `add_watch.html`, `login.html`, `client_not_found.html`.
-  One stylesheet: `static/style.css`. `static/airports.json` powers autocomplete.
+- `duffel_stays.py` — **abandoned** (Duffel Stays sales-gated; hotels use LiteAPI instead).
+- Templates: `base.html`, `index.html` (flight dashboard), `hotels.html` (hotel
+  dashboard), `client.html`, `usage.html`, `trends.html`, `add_watch.html`,
+  `login.html`, `client_not_found.html`. One stylesheet: `static/style.css`.
+  `static/airports.json` powers flight autocomplete.
 - Utility scripts: `prepare_airports.py`, `generate_tokens.py`.
 
 ---
@@ -80,16 +90,17 @@ shared password + anon key).
 
 ## 5. Environments & workflow
 
-**Two Supabase databases + two Duffel tokens, kept separate:**
+**Two Supabase databases + separate provider keys per env, kept isolated:**
 
-| | Database | Duffel token |
-|---|---|---|
-| Local dev | local Supabase stack (Docker, `supabase start`) | `duffel_test_…` (sandbox) |
-| Production | Supabase cloud (`qelanerqtfzqsgyddfmw`) | `duffel_live_…` |
+| | Database | Duffel token | LiteAPI key |
+|---|---|---|---|
+| Local dev | local Supabase stack (Docker, `supabase start`) | `duffel_test_…` (sandbox) | LiteAPI **sandbox** key (test hotels, e.g. `lp1d641`) |
+| Production | Supabase cloud (`qelanerqtfzqsgyddfmw`) | `duffel_live_…` | LiteAPI **production** key (set in Render) |
 
 This split exists because local + prod once shared one DB and a local
 `check_prices.py` run with the test token polluted production with fake "Duffel
-Airways" fares. Now isolated.
+Airways" fares. Same rule for hotels: keep the LiteAPI **sandbox** key local so
+sandbox test-hotel rates never land in prod `hotel_price_history`. Now isolated.
 
 **Schema changes go through migrations** (never hand-edit the dashboard):
 ```
@@ -109,8 +120,10 @@ Python is pinned to **3.14.5** via `PYTHON_VERSION` in `render.yaml` (both
 services), matching the local `.venv`.
 
 **Env vars:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DUFFEL_API_TOKEN`,
+`LITEAPI_KEY` (hotels — web needs it for the picker, cron for checking),
 `SENDGRID_API_KEY`, `SENDER_EMAIL`, `SLACK_WEBHOOK_URL`, `BASE_URL`,
-`APP_PASSWORD`, `FLASK_SECRET_KEY`, `RENDER_API_KEY` (optional). App password is
+`APP_PASSWORD`, `FLASK_SECRET_KEY`, `RENDER_API_KEY` (optional). All declared in
+`render.yaml` (`sync: false` secrets set in the Render dashboard). App password is
 currently `REDACTED`.
 
 ---
@@ -153,6 +166,18 @@ currently `REDACTED`.
     after it, so an edited watch no longer blends two trips (critical for passenger
     changes, where totals aren't comparable). Old rows are kept, just not shown as
     current. Non-material edits (target, client name/email) don't bump the epoch.
+20. **Hotels on LiteAPI (2026-07-18)** — Duffel Stays never got un-gated (sales
+    ignored repeated emails; Amadeus self-serve was decommissioned 2026-07-17), so
+    hotels pivoted to **LiteAPI/Nuitée** (self-serve, searches free — monetises
+    bookings). Built in phases:
+    - **P1** `hotel_prices.py` + cron checks active `hotel_watches`, stores net
+      `total` (+ per-night, per-night-per-person) in `hotel_price_history`.
+    - **P2** hotel alerts (email/Slack/error), swallow-safe (baseline from
+      `sent_alerts`); migration made `sent_alerts.watch_id` nullable + CHECK
+      exactly-one-of(watch_id, hotel_watch_id) + hotel_watch_id cascade.
+    - **P3** `/hotels` page: city→property picker (`find_hotels`), add/pause/
+      resume/delete. Verified end-to-end in the running app.
+    - **P4 (pending)** client-facing hotel cards on `/client/<token>` + history chart.
 
 ---
 
@@ -195,6 +220,12 @@ currently `REDACTED`.
   honoring `ratelimit-reset` (an RFC 2616 **HTTP date**, not a number/timestamp).
   **Stays not enabled** on the account.
 - **Duffel `total_amount` = all passengers** (a 2-pax fare ≈ 2× 1-pax).
+- **LiteAPI (hotels):** `POST /hotels/rates` (auth via **`X-API-Key`**), searches
+  are **free** (they monetise bookings — ideal for a poller). We track the **net
+  `retailRate.total`** (not `suggestedSellingPrice`); target is **per-night-per-
+  person**. Refundable via `cancellationPolicies.refundableTag` (`RFN`/`NRFN`);
+  `refundable_only=True` keeps only rates not provably non-refundable. Sandbox key
+  returns fixed test hotels (Oslo `lp1d641` etc.). 429 backoff honours `Retry-After`.
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
   blanking all charts; currently `4.5.0`. Charts must build after layout
   (DOMContentLoaded) or render 0-size.
@@ -222,17 +253,17 @@ currently `REDACTED`.
 
 **Live in production:** flight monitoring, stops-aware email+Slack alerts, client
 pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
-usage page.
+usage page. **Hotels (LiteAPI):** checking, alerts, and the `/hotels` admin UI are
+deployed — but need a **production `LITEAPI_KEY`** set in Render (web + cron) to
+function live; until then the prod picker/cron no-op with "LITEAPI_KEY is not set".
 
 **Pending / next:**
-- **Hotels** — `duffel_stays.py` + 2 API routes + tests were scoped (Session 10B)
-  but **blocked**: Duffel Stays returns "feature not enabled — contact sales."
-  Anna re-sent the Duffel contact-us access request on 2026-06-09 (awaiting
-  reply); a token's read/write setting does NOT grant Stays — it's an account-
-  level entitlement Duffel enables. (Alternative considered: Expedia Rapid/EPS API —
-  TAAP itself is a portal, not an API, so not usable.) Resume when enabled; the
-  correct endpoints are `/stays/accommodation/suggestions` + `POST /stays/search`
-  (NOT `/places/suggestions`, which is the flights endpoint).
+- **Hotels P4** — client-facing hotel cards on `/client/<token>` + a hotel price-
+  history chart (advisor-facing side is done). Also: unify the client page to show
+  a client's flights AND hotels together (tokens are already shared by email).
+- **Set prod `LITEAPI_KEY`** — the one thing blocking hotels from running live.
+- **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
+  replaced it. Left here only as history.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
   `date_prices` history to be meaningful.
 - **Downsampling** old `price_history` — build when storage approaches a threshold.
