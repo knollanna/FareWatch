@@ -27,6 +27,8 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, ses
 from supabase import Client, create_client
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from hotel_prices import find_hotels
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -325,19 +327,21 @@ def index():
 
 
 def _get_or_create_token(client_email, client_name=""):
-    """Return existing token for this client email, or generate a new readable one."""
+    """Return this client's existing token (shared across flight AND hotel watches
+    by email), or generate a new readable one."""
     import uuid, re
-    existing = (
-        supabase.table("watches")
-        .select("client_token")
-        .eq("client_email", client_email)
-        .not_.is_("client_token", "null")
-        .limit(1)
-        .execute()
-        .data
-    )
-    if existing and existing[0].get("client_token"):
-        return existing[0]["client_token"]
+    for table in ("watches", "hotel_watches"):
+        existing = (
+            supabase.table(table)
+            .select("client_token")
+            .eq("client_email", client_email)
+            .not_.is_("client_token", "null")
+            .limit(1)
+            .execute()
+            .data
+        )
+        if existing and existing[0].get("client_token"):
+            return existing[0]["client_token"]
     slug = re.sub(r'[^a-z0-9]+', '-', client_name.lower()).strip('-') or "client"
     suffix = uuid.uuid4().hex[:4]
     return f"{slug}-{suffix}"
@@ -373,6 +377,109 @@ def add_watch():
         flash(f"Watch added for {watch['origin']} → {watch['destination']}.")
         return redirect(url_for("index"))
     return render_template("add_watch.html")
+
+
+# ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
+
+def _attach_hotel_extras(hotel_watches):
+    """Attach the latest hotel_price_history row as `latest` on each hotel watch."""
+    for hw in hotel_watches:
+        latest = (
+            supabase.table("hotel_price_history")
+            .select("*")
+            .eq("hotel_watch_id", hw["id"])
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        hw["latest"] = latest[0] if latest else None
+    return hotel_watches
+
+
+@app.route("/hotels")
+@login_required
+def hotels_page():
+    """Hotel watches dashboard: active + paused, with an inline add form."""
+    active = (
+        supabase.table("hotel_watches").select("*")
+        .eq("is_active", True).order("check_in", desc=False).execute().data
+    )
+    paused = (
+        supabase.table("hotel_watches").select("*")
+        .eq("is_active", False).order("check_in", desc=False).execute().data
+    )
+    _attach_hotel_extras(active)
+    _attach_hotel_extras(paused)
+    return render_template("hotels.html", active=active, paused=paused,
+                           today=datetime.date.today().isoformat())
+
+
+@app.route("/hotels/search")
+@login_required
+def hotels_search():
+    """JSON hotel lookup for the add-watch picker: find_hotels(city, country)."""
+    city = request.args.get("city", "").strip()
+    country = request.args.get("country", "").strip().upper()
+    if not city or not country:
+        return jsonify({"error": "Enter a city and a 2-letter country code.", "hotels": []})
+    hotels, err = find_hotels(city, country, limit=25)
+    if err:
+        return jsonify({"error": err, "hotels": []})
+    return jsonify({"hotels": hotels})
+
+
+@app.route("/add_hotel", methods=["POST"])
+@login_required
+def add_hotel():
+    """Create a hotel watch. Target is per-night-per-person (stored as-is)."""
+    client_email = request.form["client_email"].strip()
+    client_name = request.form.get("client_name", "").strip()
+    hw = {
+        "accommodation_id": request.form["accommodation_id"].strip(),
+        "accommodation_name": request.form["accommodation_name"].strip(),
+        "accommodation_city": request.form.get("accommodation_city", "").strip() or None,
+        "accommodation_country": request.form.get("accommodation_country", "").strip() or None,
+        "check_in": request.form["check_in"],
+        "check_out": request.form["check_out"],
+        "guests": int(request.form.get("guests", 1)),
+        "rooms": int(request.form.get("rooms", 1)),
+        "refundable_only": request.form.get("refundable_only") == "on",
+        "target_price_per_night_per_person": round(float(request.form["target_price_per_night_per_person"]), 2),
+        "watch_mode": 1,
+        "client_name": client_name,
+        "client_email": client_email,
+        "client_token": _get_or_create_token(client_email, client_name),
+        "is_active": True,
+    }
+    supabase.table("hotel_watches").insert(hw).execute()
+    flash(f"Hotel watch added for {hw['accommodation_name']}.")
+    return redirect(url_for("hotels_page"))
+
+
+@app.route("/hotel/pause/<hotel_id>", methods=["POST"])
+@login_required
+def pause_hotel(hotel_id):
+    supabase.table("hotel_watches").update({"is_active": False}).eq("id", hotel_id).execute()
+    flash("Hotel watch paused.")
+    return redirect(url_for("hotels_page"))
+
+
+@app.route("/hotel/resume/<hotel_id>", methods=["POST"])
+@login_required
+def resume_hotel(hotel_id):
+    supabase.table("hotel_watches").update({"is_active": True}).eq("id", hotel_id).execute()
+    flash("Hotel watch resumed.")
+    return redirect(url_for("hotels_page"))
+
+
+@app.route("/hotel/delete/<hotel_id>", methods=["POST"])
+@login_required
+def delete_hotel(hotel_id):
+    """Permanently delete a hotel watch. hotel_price_history + sent_alerts cascade."""
+    supabase.table("hotel_watches").delete().eq("id", hotel_id).execute()
+    flash("Hotel watch deleted.")
+    return redirect(url_for("hotels_page"))
 
 
 @app.route("/edit/<watch_id>", methods=["POST"])
@@ -600,4 +707,6 @@ def trends():
 
 if __name__ == "__main__":
     # Local dev server only. In production, gunicorn runs `app:app` (see Procfile).
-    app.run(debug=False)
+    # Honor $PORT so the local preview can assign a free port (5000 is often taken
+    # by macOS AirPlay/ControlCenter).
+    app.run(debug=False, port=int(os.environ.get("PORT", 5000)))

@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ─────────────── Hotel watch card macro ─────────────── #}
+{% macro hotel_card(hw, paused=False) %}
+  {% set lp = hw.latest %}
+  {% set hit = lp and lp.per_night_per_person_amount <= hw.target_price_per_night_per_person %}
+  <div class="watch-card {{ 'target-met' if hit }}">
+    <div class="card-badges">
+      {% if paused %}<span class="badge badge-paused">paused</span>{% endif %}
+      {% if hw.client_name %}<span class="badge badge-client">{{ hw.client_name }}</span>{% endif %}
+    </div>
+    <div class="card-route">{{ hw.accommodation_name }}</div>
+    <div class="card-meta">
+      {% if hw.accommodation_city %}<span>{{ hw.accommodation_city }}</span>{% endif %}
+      <span>{{ hw.check_in }} – {{ hw.check_out }}</span>
+      <span>{{ hw.guests }} guest{{ 's' if hw.guests != 1 }}{% if hw.rooms != 1 %} · {{ hw.rooms }} rooms{% endif %}</span>
+      {% if hw.refundable_only %}<span>refundable only</span>{% endif %}
+    </div>
+
+    {% if lp %}
+      <div class="card-price">
+        <strong>${{ "%.0f"|format(lp.per_night_per_person_amount) }}</strong>/night/person
+        <span class="muted">· total ${{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
+          {% if lp.rate_name %}· {{ lp.rate_name }}{% endif %}
+          {% if lp.refundable is not none %}· {{ 'refundable' if lp.refundable else 'non-refundable' }}{% endif %}</span>
+      </div>
+      <div class="card-meta">
+        <span>target ${{ "%.0f"|format(hw.target_price_per_night_per_person) }}/night/person</span>
+        <span>{{ 'TARGET MET ✓' if hit else 'above target' }}</span>
+      </div>
+    {% else %}
+      <div class="card-price muted">No price yet — after the next check.</div>
+    {% endif %}
+
+    {% if hw.last_error %}<div class="card-error">⚠ {{ hw.last_error }}</div>{% endif %}
+
+    <div class="card-actions">
+      {% if paused %}
+      <form method="POST" action="/hotel/resume/{{ hw.id }}">
+        <button class="btn-sm accent" type="submit">▶ resume</button>
+      </form>
+      {% else %}
+      <form method="POST" action="/hotel/pause/{{ hw.id }}">
+        <button class="btn-sm" type="submit">⏸ pause</button>
+      </form>
+      {% endif %}
+      <form method="POST" action="/hotel/delete/{{ hw.id }}"
+            onsubmit="return confirm('Delete this hotel watch and all its history?')">
+        <button class="btn-sm danger" type="submit">delete</button>
+      </form>
+    </div>
+  </div>
+{% endmacro %}
+
+<div class="page-head">
+  <h2>Hotel watches</h2>
+  <button class="add-watch-btn" onclick="document.getElementById('add-hotel').style.display='block';this.style.display='none';">+ add hotel watch</button>
+</div>
+
+{# ─────────────── Add hotel form ─────────────── #}
+<div id="add-hotel" class="add-form" style="display:none;">
+  <form method="POST" action="/add_hotel" onsubmit="return validateHotel();">
+    <div class="form-grid">
+      <div class="form-field">
+        <label>city</label>
+        <input type="text" id="city" placeholder="Oslo" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label>country (2-letter)</label>
+        <input type="text" id="country" placeholder="NO" maxlength="2" autocomplete="off" style="text-transform:uppercase">
+      </div>
+      <div class="form-field" style="align-self:end;">
+        <button type="button" class="btn-sm accent" onclick="searchHotels()">search hotels</button>
+      </div>
+    </div>
+
+    <div class="form-field" style="margin-top:10px;">
+      <label>hotel</label>
+      <select id="hotel_select" onchange="pickHotel()"><option value="">— search a city first —</option></select>
+    </div>
+    <!-- filled by the picker -->
+    <input type="hidden" name="accommodation_id" id="accommodation_id">
+    <input type="hidden" name="accommodation_name" id="accommodation_name">
+    <input type="hidden" name="accommodation_city" id="accommodation_city">
+    <input type="hidden" name="accommodation_country" id="accommodation_country">
+
+    <div class="form-grid" style="margin-top:10px;">
+      <div class="form-field">
+        <label>check-in</label>
+        <input type="date" name="check_in" required>
+      </div>
+      <div class="form-field">
+        <label>check-out</label>
+        <input type="date" name="check_out" required>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:10px;">
+      <div class="form-field">
+        <label>guests</label>
+        <input type="number" name="guests" min="1" max="20" value="2" required>
+      </div>
+      <div class="form-field">
+        <label>rooms</label>
+        <input type="number" name="rooms" min="1" max="10" value="1" required>
+      </div>
+      <div class="form-field" style="align-self:end;">
+        <label><input type="checkbox" name="refundable_only" checked> refundable only</label>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:10px;">
+      <div class="form-field">
+        <label>target price (per night, per person, USD)</label>
+        <input type="number" name="target_price_per_night_per_person" min="1" step="0.01" placeholder="200.00" required>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:10px;">
+      <div class="form-field">
+        <label>client name</label>
+        <input type="text" name="client_name" style="text-transform:none">
+      </div>
+      <div class="form-field">
+        <label>client email</label>
+        <input type="email" name="client_email" required style="text-transform:none">
+      </div>
+    </div>
+    <div class="form-actions" style="margin-top:12px;">
+      <button type="button" class="btn-cancel" onclick="document.getElementById('add-hotel').style.display='none';">cancel</button>
+      <button type="submit" class="btn-save">add hotel watch</button>
+    </div>
+  </form>
+</div>
+
+{# ─────────────── Active ─────────────── #}
+{% if active %}
+  <div class="card-grid">
+    {% for hw in active %}{{ hotel_card(hw) }}{% endfor %}
+  </div>
+{% else %}
+  <p class="muted" style="margin-top:16px;">No active hotel watches yet. Click “add hotel watch” to start.</p>
+{% endif %}
+
+{# ─────────────── Paused ─────────────── #}
+{% if paused %}
+  <h3 style="margin-top:28px;">Paused</h3>
+  <div class="card-grid">
+    {% for hw in paused %}{{ hotel_card(hw, paused=True) }}{% endfor %}
+  </div>
+{% endif %}
+
+<script>
+async function searchHotels() {
+  const city = document.getElementById('city').value.trim();
+  const country = document.getElementById('country').value.trim();
+  const sel = document.getElementById('hotel_select');
+  if (!city || !country) { alert('Enter a city and a 2-letter country code.'); return; }
+  sel.innerHTML = '<option value="">searching…</option>';
+  try {
+    const res = await fetch(`/hotels/search?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}`);
+    const data = await res.json();
+    sel.innerHTML = '';
+    if (data.error || !data.hotels.length) {
+      sel.innerHTML = `<option value="">${data.error || 'No hotels found'}</option>`;
+      return;
+    }
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '— pick a hotel —';
+    sel.appendChild(blank);
+    data.hotels.forEach(h => {
+      const o = document.createElement('option');
+      o.value = h.id;
+      o.textContent = h.name + (h.city ? ` — ${h.city}` : '');
+      o.dataset.name = h.name;
+      o.dataset.city = h.city || city;
+      o.dataset.country = h.country || country;
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="">search failed — try again</option>';
+  }
+}
+
+function pickHotel() {
+  const sel = document.getElementById('hotel_select');
+  const o = sel.selectedOptions[0];
+  document.getElementById('accommodation_id').value = sel.value;
+  document.getElementById('accommodation_name').value = (o && sel.value) ? o.dataset.name : '';
+  document.getElementById('accommodation_city').value = (o && sel.value) ? o.dataset.city : '';
+  document.getElementById('accommodation_country').value = (o && sel.value) ? o.dataset.country : '';
+}
+
+function validateHotel() {
+  if (!document.getElementById('accommodation_id').value) {
+    alert('Search a city and pick a hotel first.');
+    return false;
+  }
+  return true;
+}
+</script>
+
+{% endblock %}
