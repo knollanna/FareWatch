@@ -25,7 +25,10 @@ from dotenv import load_dotenv
 from supabase import create_client
 from duffel import get_lowest_fare
 from hotel_prices import get_lowest_hotel_rate
-from alerts import send_alert, send_error_alert, send_slack_alert
+from alerts import (
+    send_alert, send_error_alert, send_slack_alert,
+    send_hotel_alert, send_hotel_slack_alert, send_hotel_error_alert,
+)
 
 load_dotenv()
 
@@ -275,6 +278,24 @@ def clear_hotel_error(hotel_watch_id):
     supabase.table("hotel_watches").update({"last_error": None}).eq("id", hotel_watch_id).execute()
 
 
+def get_hotel_alerted_low(hotel_watch_id):
+    """Lowest per-night-per-person price we have SUCCESSFULLY ALERTED for this hotel
+    watch (from sent_alerts, written only on a successful send). Same swallow-safe
+    baseline as flights: a failed send never advances it, so the alert is retried
+    rather than lost. Returns float or None.
+    """
+    r = (
+        supabase.table("sent_alerts")
+        .select("price")
+        .eq("hotel_watch_id", hotel_watch_id)
+        .order("price", desc=False)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return float(r[0]["price"]) if r else None
+
+
 def check_all_hotel_watches():
     """Check every active hotel watch once: fetch the cheapest net rate and store
     it in hotel_price_history. Prices tracked are net TOTAL, plus derived per-night
@@ -324,6 +345,11 @@ def check_all_hotel_watches():
                     {"consecutive_room_not_found": cnt}
                 ).eq("id", hw["id"]).execute()
             print(f"  ⚠️  {msg}")
+            # Email Anna only on a new/changed error (avoid repeat spam), same as flights.
+            if hw.get("last_error") != msg:
+                send_hotel_error_alert(hw, msg)
+            else:
+                print(f"  [hotel-error-alert] Same error as last check — not re-sending.")
             set_hotel_error(hw["id"], msg)
             errors.append(f"{name}: {msg}")
             print()
@@ -356,6 +382,32 @@ def check_all_hotel_watches():
               f"(target {rate['currency']} {target:.2f}) — {status}")
         print(f"  {rate['rate_name']} · {rate['nights']} night(s) · "
               f"total {rate['currency']} {rate['total_amount']:.2f} · {refund_label}")
+
+        # ── Alert: fire on a new per-night-per-person low at/below target ──────
+        # Baseline from sent_alerts (successful sends only) → swallow-safe, and a
+        # failed send is retried next run instead of being lost.
+        alerted_low = get_hotel_alerted_low(hw["id"])
+        if ppp <= target and (alerted_low is None or ppp < alerted_low):
+            print(f"  New low under target — sending hotel alert(s).")
+            email_ok = slack_ok = False
+            try:
+                email_ok = send_hotel_alert(hw, rate, previous_low=alerted_low)
+                if email_ok:
+                    print(f"  ✉️  Hotel email sent")
+            except Exception as e:
+                print(f"  ✉️  Hotel email failed: {e}")
+            try:
+                slack_ok = send_hotel_slack_alert(hw, rate, previous_low=alerted_low)
+                if slack_ok:
+                    print(f"  💬 Hotel Slack sent")
+            except Exception as e:
+                print(f"  💬 Hotel Slack failed: {e}")
+            if email_ok or slack_ok:
+                supabase.table("sent_alerts").insert(
+                    {"hotel_watch_id": hw["id"], "price": ppp}
+                ).execute()
+        elif ppp <= target:
+            print(f"  at/below target but not a new alerted low — skipping.")
         print()
 
         # Gentle spacing between calls to stay well under LiteAPI's fair-use limit.
