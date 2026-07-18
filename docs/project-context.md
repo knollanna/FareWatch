@@ -177,7 +177,9 @@ currently `REDACTED`.
       exactly-one-of(watch_id, hotel_watch_id) + hotel_watch_id cascade.
     - **P3** `/hotels` page: city→property picker (`find_hotels`), add/pause/
       resume/delete. Verified end-to-end in the running app.
-    - **P4 (pending)** client-facing hotel cards on `/client/<token>` + history chart.
+    - **P4** client-facing hotel cards on `/client/<token>` (flights + hotels share
+      a token by email) + `/hotel_history/<id>` Chart.js history on client & admin
+      cards. Nav item renamed "watches" → "flights". Verified in the running app.
 
 ---
 
@@ -253,15 +255,15 @@ currently `REDACTED`.
 
 **Live in production:** flight monitoring, stops-aware email+Slack alerts, client
 pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
-usage page. **Hotels (LiteAPI):** checking, alerts, and the `/hotels` admin UI are
-deployed — but need a **production `LITEAPI_KEY`** set in Render (web + cron) to
-function live; until then the prod picker/cron no-op with "LITEAPI_KEY is not set".
+usage page. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
+alerts, `/hotels` admin UI, and client-facing cards + history charts. Only thing
+missing is a **production `LITEAPI_KEY`** in Render (web + cron); until it's set
+the prod picker/cron no-op with "LITEAPI_KEY is not set".
 
 **Pending / next:**
-- **Hotels P4** — client-facing hotel cards on `/client/<token>` + a hotel price-
-  history chart (advisor-facing side is done). Also: unify the client page to show
-  a client's flights AND hotels together (tokens are already shared by email).
-- **Set prod `LITEAPI_KEY`** — the one thing blocking hotels from running live.
+- **Set prod `LITEAPI_KEY`** — the one thing blocking hotels from running live
+  (needs LiteAPI production access: business details + ToS + a card on file for
+  verification/payouts; free "Build" tier, commission-on-bookings only).
 - **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
   replaced it. Left here only as history.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
