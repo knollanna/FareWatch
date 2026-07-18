@@ -19,10 +19,12 @@ This script never serves web traffic; app.py never checks prices. They share
 only the Supabase database.
 """
 import os
+import time
 import datetime
 from dotenv import load_dotenv
 from supabase import create_client
 from duffel import get_lowest_fare
+from hotel_prices import get_lowest_hotel_rate
 from alerts import send_alert, send_error_alert, send_slack_alert
 
 load_dotenv()
@@ -259,5 +261,114 @@ def check_all_watches():
             print(f"   • {e}")
 
 
+# ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
+# Phase 1: check active hotel watches, store each check in hotel_price_history.
+# Alerts + hotel error emails come in Phase 2 (this only stores + logs).
+
+def set_hotel_error(hotel_watch_id, message):
+    """Store a human-readable failure reason on a hotel watch (shown in the UI)."""
+    supabase.table("hotel_watches").update({"last_error": message}).eq("id", hotel_watch_id).execute()
+
+
+def clear_hotel_error(hotel_watch_id):
+    """Clear a hotel watch's stored error after a successful check."""
+    supabase.table("hotel_watches").update({"last_error": None}).eq("id", hotel_watch_id).execute()
+
+
+def check_all_hotel_watches():
+    """Check every active hotel watch once: fetch the cheapest net rate and store
+    it in hotel_price_history. Prices tracked are net TOTAL, plus derived per-night
+    and per-night-per-person (the unit the target is set in). No alerts yet.
+    """
+    hotels = (
+        supabase.table("hotel_watches")
+        .select("*")
+        .eq("is_active", True)
+        .execute()
+        .data
+    )
+
+    if not hotels:
+        print("No active hotel watches found.")
+        return
+
+    print(f"Checking {len(hotels)} active hotel watch(es)...\n")
+    errors = []
+
+    for hw in hotels:
+        name = hw["accommodation_name"]
+        loc = hw.get("accommodation_city") or hw.get("accommodation_country") or ""
+        refundable_only = bool(hw.get("refundable_only"))
+        print(f"Checking {name}{f' ({loc})' if loc else ''} "
+              f"{hw['check_in']} → {hw['check_out']}, {hw['guests']} guest(s)...")
+
+        rate, err = get_lowest_hotel_rate(
+            hotel_id=hw["accommodation_id"],
+            check_in=hw["check_in"],
+            check_out=hw["check_out"],
+            guests=hw["guests"],
+            rooms=hw["rooms"],
+            refundable_only=refundable_only,
+        )
+
+        if rate is None:
+            if err:
+                msg = f"{err} — {name} ({hw['check_in']} → {hw['check_out']})"
+            else:
+                # Genuine "no rooms". Distinguish no-refundable from no-availability
+                # so the UI isn't misleading, and bump the not-found counter.
+                what = "refundable rooms" if refundable_only else "rooms"
+                msg = f"No {what} for {name} ({hw['check_in']} → {hw['check_out']})"
+                cnt = (hw.get("consecutive_room_not_found") or 0) + 1
+                supabase.table("hotel_watches").update(
+                    {"consecutive_room_not_found": cnt}
+                ).eq("id", hw["id"]).execute()
+            print(f"  ⚠️  {msg}")
+            set_hotel_error(hw["id"], msg)
+            errors.append(f"{name}: {msg}")
+            print()
+            continue
+
+        # Success — clear any prior error and reset the not-found counter.
+        clear_hotel_error(hw["id"])
+        if hw.get("consecutive_room_not_found"):
+            supabase.table("hotel_watches").update(
+                {"consecutive_room_not_found": 0}
+            ).eq("id", hw["id"]).execute()
+
+        supabase.table("hotel_price_history").insert({
+            "hotel_watch_id": hw["id"],
+            "total_amount": rate["total_amount"],
+            "per_night_amount": rate["per_night_amount"],
+            "per_night_per_person_amount": rate["per_night_per_person_amount"],
+            "currency": rate["currency"],
+            "nights": rate["nights"],
+            "rate_name": rate["rate_name"],
+            "refundable": rate["refundable"],
+        }).execute()
+
+        target = float(hw["target_price_per_night_per_person"])
+        ppp = rate["per_night_per_person_amount"]
+        status = "TARGET MET ✓" if ppp <= target else "above target"
+        refund_label = ("refundable" if rate["refundable"] else
+                        "non-refundable" if rate["refundable"] is False else "refundable n/a")
+        print(f"  Lowest: {rate['currency']} {ppp:.2f}/night/person "
+              f"(target {rate['currency']} {target:.2f}) — {status}")
+        print(f"  {rate['rate_name']} · {rate['nights']} night(s) · "
+              f"total {rate['currency']} {rate['total_amount']:.2f} · {refund_label}")
+        print()
+
+        # Gentle spacing between calls to stay well under LiteAPI's fair-use limit.
+        time.sleep(0.5)
+
+    print("Hotel check done.")
+    if errors:
+        print(f"\n⚠️  {len(errors)} hotel watch(es) had errors:")
+        for e in errors:
+            print(f"   • {e}")
+
+
 if __name__ == "__main__":
     check_all_watches()
+    print()
+    check_all_hotel_watches()
