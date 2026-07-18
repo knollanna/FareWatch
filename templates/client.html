@@ -233,6 +233,71 @@
     {% endfor %}
   </div>
 
+  {% if hotel_watches %}
+  <h2 style="font-family:var(--font-serif);font-weight:normal;font-size:24px;margin:0 0 18px;">Your hotels</h2>
+  <div class="client-cards">
+    {% for hw in hotel_watches %}
+    {% set lp = hw.latest %}
+    {% set hit_target = lp and lp.per_night_per_person_amount <= hw.target_price_per_night_per_person %}
+    {% if lp %}
+      {% set progress = [[((hw.target_price_per_night_per_person / lp.per_night_per_person_amount) * 100)|round(1), 100]|min, 0]|max %}
+    {% else %}
+      {% set progress = 0 %}
+    {% endif %}
+
+    <div class="client-card {{ 'target-met' if hit_target }}">
+
+      <div class="client-card-top">
+        <div class="client-route" style="font-size:22px;">{{ hw.accommodation_name }}</div>
+        {% if not hw.is_active %}
+          <div class="target-banner" style="background:#f5f5f5;color:var(--muted);">⏸ Paused</div>
+        {% elif hit_target %}
+          <div class="target-banner">🎯 Target reached!</div>
+        {% endif %}
+      </div>
+
+      <div class="client-meta">
+        {% if hw.accommodation_city %}<span>{{ hw.accommodation_city }}</span>{% endif %}
+        <span>{{ hw.check_in }} – {{ hw.check_out }}</span>
+        <span>{{ hw.guests }} guest{{ 's' if hw.guests != 1 }}</span>
+        {% if hw.refundable_only %}<span>refundable</span>{% endif %}
+        {% if lp %}<span>checked {{ lp.checked_at[:10] }}</span>{% endif %}
+      </div>
+
+      <div class="client-prices">
+        <div class="client-price-current {{ 'on-target' if hit_target }}">
+          {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.per_night_per_person_amount) }}
+            <span style="display:block;font-size:12px;color:var(--muted);font-family:var(--font-sans);margin-top:3px;">
+              per night / person · total {{ lp.currency }} {{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}{% if lp.rate_name %} · {{ lp.rate_name }}{% endif %}
+            </span>
+          {% else %}—{% endif %}
+        </div>
+        <div class="client-price-target">
+          your target
+          <strong>${{ "%.2f"|format(hw.target_price_per_night_per_person) }}</strong>
+          <span style="display:block;font-size:11px;color:var(--muted);">per night / person</span>
+        </div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-fill {{ 'on-target' if hit_target }}" style="width: {{ progress }}%"></div>
+      </div>
+
+      <!-- price history -->
+      <button class="client-history-toggle" onclick="toggleClientHotelHistory('{{ hw.id }}', this)">
+        show price history
+      </button>
+      <div id="client-hotel-history-{{ hw.id }}" style="display:none">
+        <div id="client-hotel-history-panel-{{ hw.id }}">
+          <em style="font-size:13px;color:var(--muted)">Loading...</em>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="client-footer">
     <p>See a fare you want to book?<br>
     <strong>Reply to your alert email and Anna will take care of everything.</strong></p>
@@ -329,6 +394,74 @@ async function toggleClientHistory(watchId, btn, passengers) {
             return '$' + c.parsed.y.toFixed(0) + (perPerson ? '/person' : '') + (sl ? ' · ' + sl : '');
           }
         }}
+      },
+      scales: {
+        y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// ── Hotels: per-night-per-person over time ──────────────────────────────────
+const clientHotelCharts = {};
+
+async function toggleClientHotelHistory(id, btn) {
+  const wrap = document.getElementById('client-hotel-history-' + id);
+  const panel = document.getElementById('client-hotel-history-panel-' + id);
+  const open = wrap.style.display === 'none';
+  wrap.style.display = open ? '' : 'none';
+  btn.textContent = open ? 'hide price history' : 'show price history';
+  if (!open || clientHotelCharts[id]) return;
+
+  const res = await fetch('/hotel_history/' + id);
+  const data = await res.json();
+
+  if (data.length < 2) {
+    panel.innerHTML = '<em style="font-size:13px;color:var(--muted)">Not enough data yet — check back soon.</em>';
+    return;
+  }
+
+  const prices = data.map(d => parseFloat(d.per_night_per_person_amount));
+  const labels = data.map(d => d.checked_at.slice(0, 10));
+  const min = Math.min(...prices).toFixed(0);
+  const max = Math.max(...prices).toFixed(0);
+  const current = prices[prices.length - 1].toFixed(0);
+
+  panel.innerHTML = `
+    <div style="display:flex;gap:20px;margin:12px 0 6px;">
+      <div style="font-size:12px;color:var(--muted)">current<strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:17px">$${current}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">lowest seen<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:17px">$${min}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">highest seen<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:17px">$${max}</strong></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">per night / person</div>
+    <div style="position:relative;height:160px;">
+      <canvas id="client-hotel-chart-${id}"></canvas>
+    </div>`;
+
+  const ctx = document.getElementById('client-hotel-chart-' + id).getContext('2d');
+  clientHotelCharts[id] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: prices,
+        borderColor: '#1D9E75',
+        backgroundColor: 'rgba(29,158,117,0.06)',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#1D9E75',
+        tension: 0.3,
+        fill: true,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (c) => '$' + c.parsed.y.toFixed(0) + '/night/person' } }
       },
       scales: {
         y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },

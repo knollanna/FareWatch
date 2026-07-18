@@ -614,10 +614,25 @@ def watch_history(watch_id):
     return jsonify(rows)
 
 
+@app.route("/hotel_history/<hotel_id>")
+def hotel_history(hotel_id):
+    """Public JSON of a hotel watch's price history (oldest→newest) for the chart."""
+    rows = (
+        supabase.table("hotel_price_history")
+        .select("per_night_per_person_amount, per_night_amount, total_amount, "
+                "currency, checked_at, nights, refundable, rate_name")
+        .eq("hotel_watch_id", hotel_id)
+        .order("checked_at", desc=False)
+        .execute()
+        .data
+    )
+    return jsonify(rows)
+
+
 @app.route("/client/<token>")
 def client_page(token):
     """Public, read-only status page for one client. No login — the token in
-    the URL is the access control. Shows only that client's active watches.
+    the URL is the access control. Shows that client's flight AND hotel watches.
     Returns a 404 page if the token matches nothing."""
     watches = (
         supabase.table("watches")
@@ -627,8 +642,18 @@ def client_page(token):
         .execute()
         .data
     )
-    if not watches:
+    hotel_watches = (
+        supabase.table("hotel_watches")
+        .select("*")
+        .eq("client_token", token)
+        .order("check_in", desc=False)
+        .execute()
+        .data
+    )
+    if not watches and not hotel_watches:
         return render_template("client_not_found.html"), 404
+
+    _attach_hotel_extras(hotel_watches)
 
     # Attach latest price to each watch
     for watch in watches:
@@ -648,10 +673,11 @@ def client_page(token):
         if watch["latest_price"]:
             watch["latest_price"]["stops_text"] = _stops_text(watch["latest_price"], watch.get("trip_type"))
 
-    client_name = watches[0]["client_name"]
+    client_name = (watches or hotel_watches)[0].get("client_name")
     updated_at = datetime.datetime.now().strftime("%-d %B %Y at %-I:%M %p")
     return render_template("client.html",
                            watches=watches,
+                           hotel_watches=hotel_watches,
                            client_name=client_name,
                            token=token,
                            updated_at=updated_at)

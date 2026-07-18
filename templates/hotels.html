@@ -35,6 +35,13 @@
 
     {% if hw.last_error %}<div class="card-error">⚠ {{ hw.last_error }}</div>{% endif %}
 
+    {% if lp %}
+    <button class="btn-sm accent" style="width:fit-content;" onclick="toggleHotelHistory('{{ hw.id }}', this)">📈 history</button>
+    <div id="hotel-hist-{{ hw.id }}" style="display:none;">
+      <div id="hotel-hist-panel-{{ hw.id }}"><em style="font-size:13px;color:var(--muted)">Loading…</em></div>
+    </div>
+    {% endif %}
+
     <div class="card-actions">
       {% if paused %}
       <form method="POST" action="/hotel/resume/{{ hw.id }}">
@@ -195,6 +202,53 @@ function validateHotel() {
     return false;
   }
   return true;
+}
+
+// ── Hotel price-history chart (per-night-per-person over time) ───────────────
+const hotelCharts = {};
+async function toggleHotelHistory(id, btn) {
+  const wrap = document.getElementById('hotel-hist-' + id);
+  const panel = document.getElementById('hotel-hist-panel-' + id);
+  const open = wrap.style.display === 'none';
+  wrap.style.display = open ? '' : 'none';
+  btn.textContent = open ? '📈 hide history' : '📈 history';
+  if (!open || hotelCharts[id]) return;
+
+  const res = await fetch('/hotel_history/' + id);
+  const data = await res.json();
+  if (data.length < 2) {
+    panel.innerHTML = '<em style="font-size:13px;color:var(--muted)">Not enough data yet — after a few more checks.</em>';
+    return;
+  }
+  const prices = data.map(d => parseFloat(d.per_night_per_person_amount));
+  const labels = data.map(d => d.checked_at.slice(0, 10));
+  const min = Math.min(...prices).toFixed(0);
+  const max = Math.max(...prices).toFixed(0);
+  const current = prices[prices.length - 1].toFixed(0);
+  panel.innerHTML = `
+    <div style="display:flex;gap:20px;margin:10px 0 4px;font-size:12px;color:var(--muted);">
+      <div>current<strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:16px">$${current}</strong></div>
+      <div>lowest<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
+      <div>highest<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">per night / person</div>
+    <div style="position:relative;height:150px;"><canvas id="hotel-chart-${id}"></canvas></div>`;
+  const ctx = document.getElementById('hotel-chart-' + id).getContext('2d');
+  hotelCharts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      data: prices, borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.06)',
+      pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#1D9E75',
+      tension: 0.3, fill: true, borderWidth: 2,
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (c) => '$' + c.parsed.y.toFixed(0) + '/night/person' } } },
+      scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
+                x: { ticks: { font: { size: 11 } } } }
+    }
+  });
 }
 </script>
 
