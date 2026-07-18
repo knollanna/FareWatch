@@ -403,3 +403,242 @@ def send_error_alert(watch, error_message):
     except requests.exceptions.RequestException as e:
         print(f"  [error-alert] Failed to send: {e}")
         return False
+
+
+# ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
+# Hotel alerts mirror the flight ones but are simpler: a single tracked price
+# (net per-night-per-person) rather than per-stop tiers. Prices passed in are the
+# values from hotel_price_history; the alert is framed per-night-per-person since
+# that's the unit the hotel target is set in.
+
+def _google_hotel_url(name, city):
+    q = f"{name} {city}".strip()
+    return f"https://www.google.com/travel/search?q={urllib.parse.quote(q)}"
+
+
+def _refund_label(refundable):
+    return "Refundable" if refundable else "Non-refundable" if refundable is False else ""
+
+
+def _sendgrid_send(to_list, cc_list, subject, text_body, html_body,
+                   from_name="Anna | FareWatch", log_tag="hotel-alert"):
+    """Shared SendGrid POST. Returns True on 202, False otherwise (never raises)."""
+    payload = {
+        "personalizations": [{
+            "to": to_list,
+            **({"cc": cc_list} if cc_list else {}),
+            "subject": subject,
+        }],
+        "from": {"email": SENDER_EMAIL, "name": from_name},
+        "reply_to": {"email": SENDER_EMAIL, "name": "Anna"},
+        "content": [
+            {"type": "text/plain", "value": text_body},
+            {"type": "text/html", "value": html_body},
+        ],
+    }
+    headers = {"Authorization": f"Bearer {SENDGRID_API_KEY}", "Content-Type": "application/json"}
+    try:
+        r = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
+        if r.status_code == 202:
+            return True
+        print(f"  [{log_tag}] SendGrid error {r.status_code}: {r.text}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [{log_tag}] Failed to send email: {e}")
+        return False
+
+
+def _build_hotel_alert_html(hw, rate, previous_low, currency):
+    name = hw["accommodation_name"]
+    city = hw.get("accommodation_city") or ""
+    client_name = hw.get("client_name") or "there"
+    ppp = rate["per_night_per_person_amount"]
+    target = float(hw["target_price_per_night_per_person"])
+    nights = rate["nights"]
+    guests = hw["guests"]
+    refund = _refund_label(rate.get("refundable"))
+    refund_html = f' · {refund}' if refund else ""
+
+    if previous_low is not None:
+        note = (f'<span style="color:#2a7a2a;font-weight:normal;font-size:13px;">'
+                f' ▼ down from {currency} {previous_low:,.0f}/night/person</span>')
+    else:
+        note = '<span style="color:#2a7a2a;font-weight:normal;font-size:13px;"> (new!)</span>'
+
+    google = _google_hotel_url(name, city)
+    token = hw.get("client_token")
+    dash = ""
+    if token:
+        dash = (f'<p style="margin:20px 0 8px;"><a href="{BASE_URL}/client/{token}" '
+                f'style="background:#1D9E75;color:white;padding:12px 24px;text-decoration:none;'
+                f'border-radius:4px;font-weight:bold;">View your dashboard →</a></p>')
+
+    return f"""<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:560px;margin:0 auto;padding:24px;">
+  <p>Hi {client_name},</p>
+  <p>Good news — a better rate just turned up for <strong>{name}</strong>{f' in {city}' if city else ''}:</p>
+  <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
+    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {ppp:,.0f}/night/person{note}</div>
+    <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
+  </div>
+  <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
+    <tr><td style="padding:4px 0;">Stay</td><td style="padding:4px 0;text-align:right;">{hw['check_in']} – {hw['check_out']} ({guests} guest{'s' if guests != 1 else ''})</td></tr>
+    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target:,.0f}/night/person</td></tr>
+  </table>
+  <p style="margin:16px 0 4px;"><a href="{google}" style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">View hotel on Google →</a></p>
+  <p>Rates can move quickly — <strong>reply to this email</strong> and I'll get it booked for you.</p>
+  {dash}
+  <p style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:13px;color:#888;">
+    Anna Knoll &nbsp;·&nbsp; Independent Travel Advisor &nbsp;·&nbsp; Fora Travel<br>
+    <a href="mailto:{SENDER_EMAIL}" style="color:#1D9E75;">{SENDER_EMAIL}</a>
+  </p>
+</body>
+</html>"""
+
+
+def _build_hotel_alert_text(hw, rate, previous_low, currency):
+    name = hw["accommodation_name"]
+    city = hw.get("accommodation_city") or ""
+    ppp = rate["per_night_per_person_amount"]
+    target = float(hw["target_price_per_night_per_person"])
+    nights = rate["nights"]
+    note = (f" (down from {currency} {previous_low:,.0f}/night/person)"
+            if previous_low is not None else " (new!)")
+    refund = _refund_label(rate.get("refundable"))
+    lines = [
+        f"Hi {hw.get('client_name') or 'there'},", "",
+        f"Good news — a better rate just turned up for {name}{f' in {city}' if city else ''}:", "",
+        f"{currency} {ppp:,.0f}/night/person{note}",
+        f"  {rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night(s)"
+        + (f" · {refund}" if refund else ""),
+        "",
+        f"Stay: {hw['check_in']} – {hw['check_out']} ({hw['guests']} guest(s))",
+        f"Your target: {currency} {target:,.0f}/night/person",
+        "",
+        f"View hotel: {_google_hotel_url(name, city)}",
+        "",
+        "Rates can move quickly — reply to this email and I'll get it booked for you.",
+    ]
+    if hw.get("client_token"):
+        lines.append(f"Your dashboard: {BASE_URL}/client/{hw['client_token']}")
+    lines += ["", "Anna Knoll · Independent Travel Advisor · Fora Travel", SENDER_EMAIL]
+    return "\n".join(lines)
+
+
+def send_hotel_alert(hotel_watch, rate, previous_low=None):
+    """Email the client (cc Anna) when a hotel's per-night-per-person net rate hits
+    a new low at/below target. Returns True on success, False otherwise (never raises).
+    """
+    currency = rate.get("currency") or "USD"
+    name = hotel_watch["accommodation_name"]
+    ppp = rate["per_night_per_person_amount"]
+    client_email = (hotel_watch.get("client_email") or "").strip()
+    client_name = hotel_watch.get("client_name") or ""
+
+    subject = f"Hotel alert: {name} — {currency} {ppp:,.0f}/night/person"
+    html_body = _build_hotel_alert_html(hotel_watch, rate, previous_low, currency)
+    text_body = _build_hotel_alert_text(hotel_watch, rate, previous_low, currency)
+
+    to_list = []
+    if client_email and "@" in client_email and client_email != SENDER_EMAIL:
+        to_list.append({"email": client_email, "name": client_name})
+    cc_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
+    if not to_list:
+        to_list = [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}]
+        cc_list = []
+
+    return _sendgrid_send(to_list, cc_list, subject, text_body, html_body, log_tag="hotel-alert")
+
+
+def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
+    """Post a Slack alert for a hotel rate hitting a new low under target.
+    Skips silently (returns False) if SLACK_WEBHOOK_URL is unset."""
+    if not SLACK_WEBHOOK_URL:
+        return False
+    currency = rate.get("currency") or "USD"
+    name = hotel_watch["accommodation_name"]
+    city = hotel_watch.get("accommodation_city") or "—"
+    ppp = rate["per_night_per_person_amount"]
+    target = float(hotel_watch["target_price_per_night_per_person"])
+    note = (f" ⬇ from ${previous_low:,.0f}" if previous_low is not None else " _(new!)_")
+    refund = _refund_label(rate.get("refundable"))
+    dates = f"{_fmt_short_date(hotel_watch['check_in'])} – {_fmt_short_date(hotel_watch['check_out'])}"
+
+    lines = [
+        f"🏨 *New hotel low: {name}*",
+        f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
+        f"*Rate:* ${ppp:,.0f}/night/person{note}",
+        f"*{rate.get('rate_name') or 'Room'}:* total ${rate['total_amount']:,.0f} for {rate['nights']} night(s)"
+        + (f" · {refund}" if refund else ""),
+        f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",
+        f"*Target:* ${target:,.0f}/night/person",
+    ]
+    payload = {
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}},
+            {"type": "actions", "elements": [{
+                "type": "button",
+                "text": {"type": "plain_text", "text": "View hotel on Google →", "emoji": True},
+                "url": _google_hotel_url(name, city if city != "—" else ""),
+            }]},
+        ]
+    }
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        if r.status_code == 200:
+            return True
+        print(f"  [hotel-slack] error {r.status_code}: {r.text[:120]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [hotel-slack] failed to send: {e}")
+        return False
+
+
+def send_hotel_error_alert(hotel_watch, error_message):
+    """Notify Anna (only) when a hotel watch errors. Mirrors send_error_alert."""
+    name = hotel_watch["accommodation_name"]
+    city = hotel_watch.get("accommodation_city") or "—"
+    client_name = hotel_watch.get("client_name") or "—"
+    subject = f"⚠ FareWatch hotel error: {name}"
+    text_body = (
+        f"A hotel watch hit an error.\n\n"
+        f"Hotel: {name} ({city})\nClient: {client_name}\n"
+        f"Stay: {hotel_watch['check_in']} - {hotel_watch['check_out']}\n\n"
+        f"Error: {error_message}\n\n"
+        f"The watch is still active and will be retried on the next run.\n"
+        f"FareWatch · automated system notification"
+    )
+    html_body = f"""<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:560px;margin:0 auto;padding:24px;">
+  <p style="font-size:16px;"><strong>⚠ A hotel watch hit an error</strong></p>
+  <p>FareWatch couldn't complete a rate check for the hotel below. It's still active and will be retried on the next run.</p>
+  <table style="border-collapse:collapse;width:100%;margin:20px 0;">
+    <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:bold;">Hotel</td><td style="padding:10px 14px;">{name} ({city})</td></tr>
+    <tr><td style="padding:10px 14px;font-weight:bold;">Client</td><td style="padding:10px 14px;">{client_name}</td></tr>
+    <tr style="background:#f5f5f5;"><td style="padding:10px 14px;font-weight:bold;">Stay</td><td style="padding:10px 14px;">{hotel_watch['check_in']} – {hotel_watch['check_out']}</td></tr>
+    <tr style="background:#fdecea;"><td style="padding:10px 14px;font-weight:bold;color:#c0392b;">Error</td><td style="padding:10px 14px;color:#c0392b;">{error_message}</td></tr>
+  </table>
+  <p style="font-size:13px;color:#888;">FareWatch · automated system notification</p>
+</body>
+</html>"""
+    payload = {
+        "personalizations": [{"to": [{"email": SENDER_EMAIL, "name": "Anna (FareWatch)"}], "subject": subject}],
+        "from": {"email": SENDER_EMAIL, "name": "FareWatch Alerts"},
+        "content": [
+            {"type": "text/plain", "value": text_body},
+            {"type": "text/html", "value": html_body},
+        ],
+    }
+    headers = {"Authorization": f"Bearer {SENDGRID_API_KEY}", "Content-Type": "application/json"}
+    try:
+        r = requests.post(SENDGRID_API_URL, json=payload, headers=headers, timeout=15)
+        if r.status_code == 202:
+            print(f"  [hotel-error-alert] Error email sent to {SENDER_EMAIL}")
+            return True
+        print(f"  [hotel-error-alert] SendGrid error {r.status_code}: {r.text}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [hotel-error-alert] Failed to send: {e}")
+        return False
