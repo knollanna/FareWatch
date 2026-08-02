@@ -28,6 +28,7 @@ from supabase import Client, create_client
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from hotel_prices import find_hotels
+from route_stats import route_price_stats
 
 load_dotenv()
 
@@ -345,6 +346,19 @@ def _get_or_create_token(client_email, client_name=""):
     slug = re.sub(r'[^a-z0-9]+', '-', client_name.lower()).strip('-') or "client"
     suffix = uuid.uuid4().hex[:4]
     return f"{slug}-{suffix}"
+
+
+@app.route("/api/route-stats")
+@login_required
+def api_route_stats():
+    """Historical price context for a route, used by the add-watch form.
+    Returns {"stats": {...}} or {"stats": null} when there's no history yet."""
+    stats = route_price_stats(
+        supabase,
+        request.args.get("origin", ""),
+        request.args.get("destination", ""),
+    )
+    return jsonify({"stats": stats})
 
 
 @app.route("/add", methods=["GET", "POST"])
