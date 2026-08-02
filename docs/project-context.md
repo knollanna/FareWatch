@@ -180,6 +180,18 @@ currently `REDACTED`.
     - **P4** client-facing hotel cards on `/client/<token>` (flights + hotels share
       a token by email) + `/hotel_history/<id>` Chart.js history on client & admin
       cards. Nav item renamed "watches" → "flights". Verified in the running app.
+21. **Route price-history context on add-watch (2026-08-02)** — new `route_stats.py`
+    aggregates `price_history` across **all watches on a route, active AND archived**,
+    so a closed watch's retained history finally gets used: when adding a watch you
+    see what the route has historically cost before setting a target. `route_price_stats`
+    returns lowest / median (typical) / latest + observation & watch counts + date
+    range (null prices dropped so a failed check never reads as a $0 low). Exposed via
+    login-gated `GET /api/route-stats?origin=&destination=`; the add-watch form fetches
+    it on blur once both airport codes are filled and shows a "📊 route history" box
+    (hidden when there's no history). v1 is deliberately **route-wide** (no seasonality
+    filtering) — `route_stats.py` holds the reusable primitives (`_route_watch_ids`,
+    `_prices_for_watches`) for future trends (per-season lows, booking lead time,
+    trend direction). Verified end-to-end in the running app; deployed to prod.
 
 ---
 
@@ -235,6 +247,27 @@ currently `REDACTED`.
   pre-fillable Duffel search URL exists — we show route/date/flight to copy).
 - **Storage:** ~1 MB used of 500 MB free; per-date capture adds ~15%/row. Years
   of runway. Downsampling old data is the deferred safety net (not built yet).
+- **Local Supabase: broken `postgres:17.6.1.127` image on Apple Silicon (2026-08-02).**
+  Supabase CLI (through at least v2.111) pins `public.ecr.aws/supabase/postgres:17.6.1.127`,
+  whose **arm64 manifest is mislabeled** — the image reports `Architecture=arm64`
+  but the binaries are x86, so `supabase start` fails with the db container in an
+  **exit-0 restart loop and EMPTY logs**. Symptom is silent: `docker logs` shows
+  nothing; `docker run … postgres --version` gives `exec: exec format error` even
+  though native arm64 images (e.g. `alpine`) run fine. **Fix:** retag a working
+  build as the pinned tag — `docker tag public.ecr.aws/supabase/postgres:17.6.1.132
+  public.ecr.aws/supabase/postgres:17.6.1.127` — then `supabase start` sees `.127`
+  present and skips the broken pull. **Caveat:** the retag is lost if the image is
+  removed/purged; a `supabase stop` + fresh pull re-fetches the broken `.127`. A
+  permanent fix (pin a good postgres image in `config.toml`) is not yet done.
+- **Local Supabase: `anon` lacks table GRANTs (2026-08-02).** The init migration
+  enables RLS + "Allow all" policies but relies on Supabase's platform default-
+  privilege grants, which **don't get applied locally** the way they do in prod —
+  so `anon` (the key the app uses) gets `permission denied for table watches` (SQL
+  42501) against a fresh local DB, even though prod works. **Fix (local only):**
+  `docker exec supabase_db_farewatch psql -U postgres -d postgres -c "GRANT USAGE
+  ON SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL TABLES IN
+  SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL SEQUENCES IN
+  SCHEMA public TO anon, authenticated, service_role;"`. Not needed in prod.
 
 ---
 
@@ -248,6 +281,23 @@ currently `REDACTED`.
   Airways'` / `flight_number LIKE 'ZZ%'`.
 - **Tier/per-date data** only appears on rows checked *after* the relevant feature
   deployed; older rows show "after next check" notes.
+- **Local `supabase start` won't come up healthy (2026-08-02 playbook):** work
+  through these in order.
+  1. **Run from the project root** (`farewatch/`), not a subdir or the parent
+     `Projects/` — the CLI resolves `./supabase/config.toml` from cwd, and there's a
+     *separate* Supabase project in the parent dir that will grab ports 54321/54322
+     and block farewatch. `supabase stop --project-id <name>` to clear a stray one.
+  2. **Corrupt Docker image store** (I/O errors, "blob … input/output error",
+     `docker system df` failing): a single `docker pull` reuses poisoned cached
+     layers. Fix with a full purge — Docker Desktop → Troubleshoot → *Clean / Purge
+     data* (in v4.84+ it's the bug icon, not in Settings), or `docker system prune
+     -a --volumes`. Safe here (prod is remote Supabase + Render; local is disposable).
+  3. **db in exit-0 restart loop with empty logs** = the broken `postgres:17.6.1.127`
+     image — see the retag fix in §7 gotchas.
+  4. **`permission denied for table` from the app/anon** = missing local grants —
+     see the GRANT fix in §7 gotchas.
+  5. Then `supabase db reset` to apply migrations (local DB starts empty — real data
+     lives in the linked remote project, not locally).
 
 ---
 
@@ -255,7 +305,7 @@ currently `REDACTED`.
 
 **Live in production:** flight monitoring, stops-aware email+Slack alerts, client
 pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
-usage page. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
+usage page, route price-history context on the add-watch form. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
 alerts, `/hotels` admin UI, and client-facing cards + history charts. Only thing
 missing is a **production `LITEAPI_KEY`** in Render (web + cron); until it's set
 the prod picker/cron no-op with "LITEAPI_KEY is not set".
