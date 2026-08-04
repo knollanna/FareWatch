@@ -238,8 +238,11 @@ currently `REDACTED`.
   are **free** (they monetise bookings — ideal for a poller). We track the **net
   `retailRate.total`** (not `suggestedSellingPrice`); target is **per-night-per-
   person**. Refundable via `cancellationPolicies.refundableTag` (`RFN`/`NRFN`);
-  `refundable_only=True` keeps only rates not provably non-refundable. Sandbox key
-  returns fixed test hotels (Oslo `lp1d641` etc.). 429 backoff honours `Retry-After`.
+  `refundable_only=True` sends the native **`refundableRatesOnly`** param (server-side
+  RFN filter) — do NOT also send `maxRatesPerHotel` (LiteAPI caps to the N cheapest,
+  usually non-refundable, BEFORE filtering → 0 rates). We capture `boardName`/`boardType`
+  (meal plan) per rate for comparability. Sandbox key returns fixed test hotels (Oslo
+  `lp1d641` etc.). 429 backoff honours `Retry-After`.
 - **LiteAPI storage terms (confirmed 2026-07-18 via their support chatbot — not a
   signed legal opinion):** persisting a per-hotel price-history time-series is fine
   as *analytics/price-tracking*, BUT stored rates must **not** be shown as guaranteed
@@ -248,9 +251,9 @@ currently `REDACTED`.
   caveat; the price-history **chart is admin-only** (`/hotel_history` is
   `@login_required`, removed from the client page). Store only minimal fields (never
   the full payload); don't persist `offerId` long-term. If booking is ever added:
-  re-shop + `POST /rates/prebook` before payment. Deferred options they suggested:
-  extra disambiguation fields (`boardName`, `paymentTypes`, occupancy) and switching
-  cheapest-only tracking to `POST /hotels/min-rates`.
+  re-shop + `POST /rates/prebook` before payment. `boardName`/`boardType` now captured.
+  `POST /hotels/min-rates` evaluated + **rejected** (too lean — no refundable filter,
+  no rate/board detail). Still deferred: storing `paymentTypes`, pinning board per watch.
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
   blanking all charts; currently `4.5.0`. Charts must build after layout
   (DOMContentLoaded) or render 0-size.
@@ -317,16 +320,23 @@ currently `REDACTED`.
 **Live in production:** flight monitoring, stops-aware email+Slack alerts, client
 pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
 usage page, route price-history context on the add-watch form. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
-alerts, `/hotels` admin UI, and client-facing cards + history charts. Only thing
-missing is a **production `LITEAPI_KEY`** in Render (web + cron); until it's set
-the prod picker/cron no-op with "LITEAPI_KEY is not set".
+alerts, `/hotels` admin UI, and client-facing cards + history charts. **Not live
+yet:** the hotel migrations aren't pushed to prod and there's no production
+**`LITEAPI_KEY`** — see the go-live checklist below. Until then the prod picker/cron
+no-op with "LITEAPI_KEY is not set".
 
 **Pending / next:**
-- **Set prod `LITEAPI_KEY`** — the one thing blocking hotels from running live
-  (needs LiteAPI production access: business details + ToS + a card on file for
-  verification/payouts; free "Build" tier, commission-on-bookings only). The ToS
-  storage question is **resolved** — storing price history is OK with the
-  presentation safeguards now in place (see §7).
+- **Hotels go-live checklist** — do these in order when ready to run hotels live.
+  Hotel migrations are applied locally + committed to the repo but **deliberately
+  NOT pushed to prod** (the feature is dormant, so we don't touch prod prematurely):
+  1. `supabase login` (the CLI session expires) → **`supabase db push`** to apply
+     ALL pending hotel migrations to prod. **Do this first** — the checker inserts
+     `board_name`/`board_type` etc., so prod would error on the missing columns.
+  2. Set the production **`LITEAPI_KEY`** on Render (web + cron). Needs LiteAPI
+     production access: business details + ToS + a card on file (free "Build" tier,
+     commission-on-bookings; ToS storage question **resolved** — see §7). Use the
+     **production** key, never the sandbox one (test-hotel pollution).
+  3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.
 - **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
   replaced it. Left here only as history.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
