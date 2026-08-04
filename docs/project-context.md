@@ -320,7 +320,9 @@ currently `REDACTED`.
 **Live in production:** flight monitoring, stops-aware email+Slack alerts, client
 pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
 usage page, route price-history context on the add-watch form. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
-alerts, `/hotels` admin UI, and client-facing cards + history charts. **Not live
+alerts, `/hotels` admin UI, and client-facing cards. The price-history **chart is
+admin-only** — deliberately, per the LiteAPI storage terms in §7; the client page
+shows a "lowest observed" card with the live-rates caveat and no chart. **Not live
 yet:** the hotel migrations aren't pushed to prod and there's no production
 **`LITEAPI_KEY`** — see the go-live checklist below. Until then the prod picker/cron
 no-op with "LITEAPI_KEY is not set".
@@ -329,9 +331,15 @@ no-op with "LITEAPI_KEY is not set".
 - **Hotels go-live checklist** — do these in order when ready to run hotels live.
   Hotel migrations are applied locally + committed to the repo but **deliberately
   NOT pushed to prod** (the feature is dormant, so we don't touch prod prematurely):
-  1. `supabase login` (the CLI session expires) → **`supabase db push`** to apply
-     ALL pending hotel migrations to prod. **Do this first** — the checker inserts
-     `board_name`/`board_type` etc., so prod would error on the missing columns.
+  1. `supabase login` (the CLI session expires) → **`supabase db push --linked
+     --include-all`** to apply ALL pending hotel migrations to prod. **Do this
+     first** — the checker inserts `board_name`/`board_type` etc., so prod would
+     error on the missing columns. **`--include-all` is required, not optional:**
+     `20260602000000_add_hotel_tables.sql` sorts *before* five migrations already
+     applied in prod (`20260602010000` … `20260609010000`), and a plain `db push`
+     refuses to insert migrations that predate the last row in the remote history
+     table. Confirm with `supabase db push --linked --dry-run` first (read-only) —
+     it lists exactly the three hotel migrations and nothing else.
   2. Set the production **`LITEAPI_KEY`** on Render (web + cron). Needs LiteAPI
      production access: business details + ToS + a card on file (free "Build" tier,
      commission-on-bookings; ToS storage question **resolved** — see §7). Use the

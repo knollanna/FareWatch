@@ -565,19 +565,23 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
     city = hotel_watch.get("accommodation_city") or "—"
     ppp = rate["per_night_per_person_amount"]
     target = float(hotel_watch["target_price_per_night_per_person"])
-    note = (f" ⬇ from ${previous_low:,.0f}" if previous_low is not None else " _(new!)_")
+    # Label prices with the rate's own currency, like the email and the stored
+    # history do — not a hardcoded "$". LiteAPI is asked for USD today, so this
+    # is the same string in practice; it stops being so the moment a watch is
+    # priced in anything else.
+    note = (f" ⬇ from {currency} {previous_low:,.0f}" if previous_low is not None else " _(new!)_")
     refund = _refund_label(rate.get("refundable"))
     dates = f"{_fmt_short_date(hotel_watch['check_in'])} – {_fmt_short_date(hotel_watch['check_out'])}"
 
     lines = [
         f"🏨 *New hotel low: {name}*",
         f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
-        f"*Lowest observed:* ${ppp:,.0f}/night/person{note}",
-        f"*{rate.get('rate_name') or 'Room'}:* total ${rate['total_amount']:,.0f} for {rate['nights']} night(s)"
+        f"*Lowest observed:* {currency} {ppp:,.0f}/night/person{note}",
+        f"*{rate.get('rate_name') or 'Room'}:* total {currency} {rate['total_amount']:,.0f} for {rate['nights']} night(s)"
         + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",
-        f"*Target:* ${target:,.0f}/night/person",
+        f"*Target:* {currency} {target:,.0f}/night/person",
         "_Rates are live and can change until booked._",
     ]
     payload = {

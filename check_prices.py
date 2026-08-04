@@ -316,7 +316,14 @@ def check_all_hotel_watches():
     print(f"Checking {len(hotels)} active hotel watch(es)...\n")
     errors = []
 
-    for hw in hotels:
+    for i, hw in enumerate(hotels):
+        # Gentle spacing between LiteAPI calls to stay well under their fair-use
+        # limit. Done BEFORE the call rather than at the end of the loop body, so
+        # the error paths — which `continue` — can't skip it. A run of failing
+        # watches used to fire back-to-back with no spacing at all.
+        if i:
+            time.sleep(0.5)
+
         name = hw["accommodation_name"]
         loc = hw.get("accommodation_city") or hw.get("accommodation_country") or ""
         refundable_only = bool(hw.get("refundable_only"))
@@ -413,9 +420,6 @@ def check_all_hotel_watches():
             print(f"  at/below target but not a new alerted low — skipping.")
         print()
 
-        # Gentle spacing between calls to stay well under LiteAPI's fair-use limit.
-        time.sleep(0.5)
-
     print("Hotel check done.")
     if errors:
         print(f"\n⚠️  {len(errors)} hotel watch(es) had errors:")
@@ -424,6 +428,20 @@ def check_all_hotel_watches():
 
 
 if __name__ == "__main__":
-    check_all_watches()
-    print()
-    check_all_hotel_watches()
+    import sys
+    import traceback
+
+    # Isolate the two subsystems: an unhandled crash in one must not skip the
+    # other. Flights run first (established order); hotels always get their turn.
+    # If either crashes we still exit non-zero so Render flags the cron run.
+    crashed = False
+    for label, run in (("Flight", check_all_watches), ("Hotel", check_all_hotel_watches)):
+        try:
+            run()
+        except Exception:
+            crashed = True
+            print(f"\n‼️  {label} check crashed (the other still ran):")
+            traceback.print_exc()
+        print()
+    if crashed:
+        sys.exit(1)

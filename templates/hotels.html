@@ -61,6 +61,8 @@
   </div>
 {% endmacro %}
 
+<div class="page">
+
 <div class="page-head">
   <h2>Hotel watches</h2>
   <button class="add-watch-btn" onclick="document.getElementById('add-hotel').style.display='block';this.style.display='none';">+ add hotel watch</button>
@@ -72,7 +74,9 @@
     <div class="form-grid">
       <div class="form-field">
         <label>city</label>
-        <input type="text" id="city" placeholder="Oslo" autocomplete="off">
+        <!-- text-transform:none — the global .form-field rule uppercases text
+             inputs for airport codes; a city name isn't one. -->
+        <input type="text" id="city" placeholder="Oslo" autocomplete="off" style="text-transform:none">
       </div>
       <div class="form-field">
         <label>country (2-letter)</label>
@@ -141,7 +145,7 @@
 
 {# ─────────────── Active ─────────────── #}
 {% if active %}
-  <div class="card-grid">
+  <div class="cards-grid">
     {% for hw in active %}{{ hotel_card(hw) }}{% endfor %}
   </div>
 {% else %}
@@ -151,10 +155,12 @@
 {# ─────────────── Paused ─────────────── #}
 {% if paused %}
   <h3 style="margin-top:28px;">Paused</h3>
-  <div class="card-grid">
+  <div class="cards-grid">
     {% for hw in paused %}{{ hotel_card(hw, paused=True) }}{% endfor %}
   </div>
 {% endif %}
+
+</div>{# /.page #}
 
 <script>
 async function searchHotels() {
@@ -200,6 +206,12 @@ function pickHotel() {
 function validateHotel() {
   if (!document.getElementById('accommodation_id').value) {
     alert('Search a city and pick a hotel first.');
+    return false;
+  }
+  const ci = document.querySelector('input[name="check_in"]').value;
+  const co = document.querySelector('input[name="check_out"]').value;
+  if (ci && co && co <= ci) {
+    alert('Check-out must be after check-in.');
     return false;
   }
   return true;

@@ -56,7 +56,12 @@ def method_not_allowed(_e):
     an /edit/<id> URL, or a stale cached tab submitting against old page state —
     would otherwise show Werkzeug's raw 'Method Not Allowed' page. Quietly send
     the user back to the dashboard instead (which itself redirects to /login if
-    they're not authenticated)."""
+    they're not authenticated).
+
+    The hotel action routes (/hotel/pause|resume|delete) are POST-only for the
+    same reason, so send those back to /hotels rather than the flight page."""
+    if request.path.startswith("/hotel"):
+        return redirect(url_for("hotels_page"))
     return redirect(url_for("index"))
 
 
@@ -174,7 +179,9 @@ def _get_metrics(active_watches, all_watches):
     # Active watch count
     active_count = len(active_watches)
 
-    # Total alerts sent
+    # Total alerts sent. Deliberately spans BOTH flights and hotels (sent_alerts
+    # is shared) — the "alerts sent" tile is a business-wide count. The recent-
+    # alerts feed below it is flight-only, since it renders a route.
     try:
         alerts_result = supabase.table("sent_alerts").select("id", count="exact").execute()
         alerts_count = alerts_result.count or 0
@@ -202,11 +209,18 @@ def _get_metrics(active_watches, all_watches):
 
 
 def _get_recent_alerts():
-    """Fetch last 8 sent alerts with watch details."""
+    """Fetch last 8 FLIGHT alerts with watch details.
+
+    sent_alerts is shared with hotels: a hotel alert row has hotel_watch_id set
+    and watch_id NULL, so the embedded watches(...) join returns nothing and the
+    row would render as "? → ?" in this route-shaped feed. Filter to rows that
+    have a flight watch. (Hotel alerts surface on /hotels, not here.)
+    """
     try:
         rows = (
             supabase.table("sent_alerts")
             .select("*, watches(origin, destination, client_name, client_email)")
+            .not_.is_("watch_id", "null")
             .order("sent_at", desc=True)
             .limit(8)
             .execute()
@@ -449,13 +463,28 @@ def add_hotel():
     """Create a hotel watch. Target is per-night-per-person (stored as-is)."""
     client_email = request.form["client_email"].strip()
     client_name = request.form.get("client_name", "").strip()
+
+    # Reject an impossible stay here. Without this the watch is stored and then
+    # fails on EVERY cron run ("check_out must be after check_in"), with an error
+    # email on the first one — a silent, self-inflicted permanent error.
+    check_in = request.form["check_in"]
+    check_out = request.form["check_out"]
+    try:
+        nights = (datetime.date.fromisoformat(check_out)
+                  - datetime.date.fromisoformat(check_in)).days
+    except ValueError:
+        nights = 0
+    if nights <= 0:
+        flash("Check-out must be after check-in — hotel watch not added.")
+        return redirect(url_for("hotels_page"))
+
     hw = {
         "accommodation_id": request.form["accommodation_id"].strip(),
         "accommodation_name": request.form["accommodation_name"].strip(),
         "accommodation_city": request.form.get("accommodation_city", "").strip() or None,
         "accommodation_country": request.form.get("accommodation_country", "").strip() or None,
-        "check_in": request.form["check_in"],
-        "check_out": request.form["check_out"],
+        "check_in": check_in,
+        "check_out": check_out,
         "guests": int(request.form.get("guests", 1)),
         "rooms": int(request.form.get("rooms", 1)),
         "refundable_only": request.form.get("refundable_only") == "on",

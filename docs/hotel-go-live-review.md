@@ -65,9 +65,12 @@ storage-terms gotchas), §8 (runbook), **§9 (go-live checklist)**.
 - Hotel watches use only `is_active` (no `is_paused`/`is_archived`).
 
 ## Go-live steps (from §9)
-1. `supabase login` → **`supabase db push`** — apply ALL pending hotel migrations to
-   prod. **Do this FIRST** (the checker inserts `board_name` etc.; prod would error
-   on missing columns).
+1. `supabase login` → **`supabase db push --linked --include-all`** — apply ALL
+   pending hotel migrations to prod. **Do this FIRST** (the checker inserts
+   `board_name` etc.; prod would error on missing columns). `--include-all` is
+   required: `20260602000000_add_hotel_tables.sql` predates five migrations already
+   in prod, and a plain `db push` refuses out-of-order migrations. Dry-run first:
+   `supabase db push --linked --dry-run`.
 2. Set the **production** `LITEAPI_KEY` on Render (web + cron) — production key,
    never the sandbox one (test-hotel pollution).
 3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.

@@ -169,13 +169,22 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
     if not LITEAPI_KEY:
         return None, "LITEAPI_KEY is not set"
 
+    occupancies = _build_occupancies(guests, rooms)
+    # The number of adults LiteAPI actually prices. _build_occupancies puts at
+    # least one adult in every room, so a watch with rooms > guests (e.g. 1 guest,
+    # 2 rooms) is quoted for MORE people than the watch asks for. Divide the
+    # per-person figure by what was priced, not by `guests` — otherwise
+    # per-night-per-person is inflated by the difference, and that figure is the
+    # alert threshold.
+    priced_guests = max(sum(o["adults"] for o in occupancies), 1)
+
     body = {
         "hotelIds": [hotel_id],
         "checkin": check_in,
         "checkout": check_out,
         "currency": currency,
         "guestNationality": guest_nationality,
-        "occupancies": _build_occupancies(guests, rooms),
+        "occupancies": occupancies,
     }
     if refundable_only:
         # Native server-side refundable filter (RFN only). More reliable than our
@@ -230,7 +239,7 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
         rate = {
             "total_amount": round(total, 2),
             "per_night_amount": round(total / nights, 2),
-            "per_night_per_person_amount": round(total / nights / max(guests, 1), 2),
+            "per_night_per_person_amount": round(total / nights / priced_guests, 2),
             "currency": best["currency"],
             "nights": nights,
             "rate_name": best["rate_name"],
