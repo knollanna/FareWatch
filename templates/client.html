@@ -267,7 +267,7 @@
         <div class="client-price-current {{ 'on-target' if hit_target }}">
           {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.per_night_per_person_amount) }}
             <span style="display:block;font-size:12px;color:var(--muted);font-family:var(--font-sans);margin-top:3px;">
-              lowest observed · per night / person · total {{ lp.currency }} {{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}{% if lp.rate_name %} · {{ lp.rate_name }}{% endif %}
+              lowest observed · per night / person · total {{ lp.currency }} {{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}{% if lp.rate_name %} · {{ lp.rate_name }}{% endif %}{% if lp.board_name %} · {{ lp.board_name }}{% endif %}
             </span>
           {% else %}—{% endif %}
         </div>

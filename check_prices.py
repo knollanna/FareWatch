@@ -370,6 +370,8 @@ def check_all_hotel_watches():
             "currency": rate["currency"],
             "nights": rate["nights"],
             "rate_name": rate["rate_name"],
+            "board_name": rate.get("board_name"),
+            "board_type": rate.get("board_type"),
             "refundable": rate["refundable"],
         }).execute()
 
@@ -380,7 +382,8 @@ def check_all_hotel_watches():
                         "non-refundable" if rate["refundable"] is False else "refundable n/a")
         print(f"  Lowest: {rate['currency']} {ppp:.2f}/night/person "
               f"(target {rate['currency']} {target:.2f}) — {status}")
-        print(f"  {rate['rate_name']} · {rate['nights']} night(s) · "
+        board = f" · {rate['board_name']}" if rate.get("board_name") else ""
+        print(f"  {rate['rate_name']}{board} · {rate['nights']} night(s) · "
               f"total {rate['currency']} {rate['total_amount']:.2f} · {refund_label}")
 
         # ── Alert: fire on a new per-night-per-person low at/below target ──────

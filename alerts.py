@@ -458,6 +458,7 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
     guests = hw["guests"]
     refund = _refund_label(rate.get("refundable"))
     refund_html = f' · {refund}' if refund else ""
+    board_html = f' · {rate.get("board_name")}' if rate.get("board_name") else ""
 
     if previous_low is not None:
         note = (f'<span style="color:#2a7a2a;font-weight:normal;font-size:13px;">'
@@ -480,7 +481,7 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
   <p>Good news — a better rate just turned up for <strong>{name}</strong>{f' in {city}' if city else ''}:</p>
   <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
     <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {ppp:,.0f}/night/person{note}</div>
-    <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
+    <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'}{board_html} · total {currency} {rate['total_amount']:,.0f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
   </div>
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Stay</td><td style="padding:4px 0;text-align:right;">{hw['check_in']} – {hw['check_out']} ({guests} guest{'s' if guests != 1 else ''})</td></tr>
@@ -512,6 +513,7 @@ def _build_hotel_alert_text(hw, rate, previous_low, currency):
         f"Good news — a better rate just turned up for {name}{f' in {city}' if city else ''}:", "",
         f"{currency} {ppp:,.0f}/night/person{note}",
         f"  {rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night(s)"
+        + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         "",
         f"Stay: {hw['check_in']} – {hw['check_out']} ({hw['guests']} guest(s))",
@@ -572,6 +574,7 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
         f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
         f"*Lowest observed:* ${ppp:,.0f}/night/person{note}",
         f"*{rate.get('rate_name') or 'Room'}:* total ${rate['total_amount']:,.0f} for {rate['nights']} night(s)"
+        + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",
         f"*Target:* ${target:,.0f}/night/person",

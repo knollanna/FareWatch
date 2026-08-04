@@ -23,6 +23,7 @@
         <strong>${{ "%.0f"|format(lp.per_night_per_person_amount) }}</strong>/night/person
         <span class="muted">· total ${{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
           {% if lp.rate_name %}· {{ lp.rate_name }}{% endif %}
+          {% if lp.board_name %}· {{ lp.board_name }}{% endif %}
           {% if lp.refundable is not none %}· {{ 'refundable' if lp.refundable else 'non-refundable' }}{% endif %}</span>
       </div>
       <div class="card-meta">

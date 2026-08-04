@@ -132,6 +132,8 @@ def _extract_rates(payload):
                     "currency": cur or "USD",
                     "rate_name": r.get("name") or r.get("boardName") or rt.get("name"),
                     "rate_code": r.get("rateId") or r.get("rateCode") or offer_id,
+                    "board_name": r.get("boardName"),
+                    "board_type": r.get("boardType"),
                     "refundable": _rate_refundable(r),
                     "offer_id": r.get("offerId") or offer_id,
                 })
@@ -233,6 +235,8 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
             "nights": nights,
             "rate_name": best["rate_name"],
             "rate_code": best["rate_code"],
+            "board_name": best["board_name"],
+            "board_type": best["board_type"],
             "refundable": best["refundable"],
             "offer_id": best["offer_id"],
         }
