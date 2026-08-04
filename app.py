@@ -629,8 +629,10 @@ def watch_history(watch_id):
 
 
 @app.route("/hotel_history/<hotel_id>")
+@login_required
 def hotel_history(hotel_id):
-    """Public JSON of a hotel watch's price history (oldest→newest) for the chart."""
+    """Admin-only JSON of a hotel watch's price history (oldest→newest) for the
+    chart. Kept off the client page — hotel history is visible to Anna only."""
     rows = (
         supabase.table("hotel_price_history")
         .select("per_night_per_person_amount, per_night_amount, total_amount, "

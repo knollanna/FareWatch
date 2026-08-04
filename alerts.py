@@ -487,6 +487,7 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
     <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target:,.0f}/night/person</td></tr>
   </table>
   <p style="margin:16px 0 4px;"><a href="{google}" style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">View hotel on Google →</a></p>
+  <p style="font-size:12px;color:#888;">This is the lowest rate we observed on the last check — hotel rates are live and can change until booked.</p>
   <p>Rates can move quickly — <strong>reply to this email</strong> and I'll get it booked for you.</p>
   {dash}
   <p style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:13px;color:#888;">
@@ -518,6 +519,7 @@ def _build_hotel_alert_text(hw, rate, previous_low, currency):
         "",
         f"View hotel: {_google_hotel_url(name, city)}",
         "",
+        "This is the lowest rate we observed on the last check — hotel rates are live and can change until booked.",
         "Rates can move quickly — reply to this email and I'll get it booked for you.",
     ]
     if hw.get("client_token"):
@@ -568,11 +570,12 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
     lines = [
         f"🏨 *New hotel low: {name}*",
         f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
-        f"*Rate:* ${ppp:,.0f}/night/person{note}",
+        f"*Lowest observed:* ${ppp:,.0f}/night/person{note}",
         f"*{rate.get('rate_name') or 'Room'}:* total ${rate['total_amount']:,.0f} for {rate['nights']} night(s)"
         + (f" · {refund}" if refund else ""),
         f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",
         f"*Target:* ${target:,.0f}/night/person",
+        "_Rates are live and can change until booked._",
     ]
     payload = {
         "blocks": [
