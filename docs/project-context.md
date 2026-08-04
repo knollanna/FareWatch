@@ -240,6 +240,17 @@ currently `REDACTED`.
   person**. Refundable via `cancellationPolicies.refundableTag` (`RFN`/`NRFN`);
   `refundable_only=True` keeps only rates not provably non-refundable. Sandbox key
   returns fixed test hotels (Oslo `lp1d641` etc.). 429 backoff honours `Retry-After`.
+- **LiteAPI storage terms (confirmed 2026-07-18 via their support chatbot — not a
+  signed legal opinion):** persisting a per-hotel price-history time-series is fine
+  as *analytics/price-tracking*, BUT stored rates must **not** be shown as guaranteed
+  quotes (they're live shopping data). So: client cards show the current "lowest
+  observed" rate + a "live, can change until booked" caveat; alerts carry the same
+  caveat; the price-history **chart is admin-only** (`/hotel_history` is
+  `@login_required`, removed from the client page). Store only minimal fields (never
+  the full payload); don't persist `offerId` long-term. If booking is ever added:
+  re-shop + `POST /rates/prebook` before payment. Deferred options they suggested:
+  extra disambiguation fields (`boardName`, `paymentTypes`, occupancy) and switching
+  cheapest-only tracking to `POST /hotels/min-rates`.
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
   blanking all charts; currently `4.5.0`. Charts must build after layout
   (DOMContentLoaded) or render 0-size.
@@ -313,7 +324,9 @@ the prod picker/cron no-op with "LITEAPI_KEY is not set".
 **Pending / next:**
 - **Set prod `LITEAPI_KEY`** — the one thing blocking hotels from running live
   (needs LiteAPI production access: business details + ToS + a card on file for
-  verification/payouts; free "Build" tier, commission-on-bookings only).
+  verification/payouts; free "Build" tier, commission-on-bookings only). The ToS
+  storage question is **resolved** — storing price history is OK with the
+  presentation safeguards now in place (see §7).
 - **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
   replaced it. Left here only as history.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
