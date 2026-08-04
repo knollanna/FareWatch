@@ -175,6 +175,14 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
         "guestNationality": guest_nationality,
         "occupancies": _build_occupancies(guests, rooms),
     }
+    if refundable_only:
+        # Native server-side refundable filter (RFN only). More reliable than our
+        # client-side heuristic — which keeps rates with an *unknown* refundable
+        # tag — and returns the cheapest genuinely-refundable rate directly.
+        # NOTE: do NOT combine with maxRatesPerHotel — LiteAPI applies the cap
+        # BEFORE this filter, so "5 cheapest" (often non-refundable) then filtered
+        # to refundable can yield zero rates. We keep the full list and pick min.
+        body["refundableRatesOnly"] = True
 
     max_retries = 5
     for attempt in range(max_retries + 1):
