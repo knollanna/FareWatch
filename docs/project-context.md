@@ -193,12 +193,41 @@ currently `REDACTED`.
     `_prices_for_watches`) for future trends (per-season lows, booking lead time,
     trend direction). Verified end-to-end in the running app; deployed to prod.
 
+22. **Client-page hardening (2026-08-18)** — done ahead of advertising FareWatch
+    publicly as a free lead magnet, which turns client tokens from "links held by
+    people Anna knows" into "links held by strangers whose names are public".
+    Tokens were `firstname-lastname-xxxx`: the name half is public and the random
+    half was 4 hex chars (65,536), walkable by a script in minutes against an app
+    with no rate limiting. Now `firstname-<secrets.token_urlsafe(16)>` (128 bits),
+    first name only so a forwarded URL doesn't carry the surname. Plus: app-wide
+    `X-Robots-Tag: noindex, nofollow, noarchive` + `/robots.txt`, app-wide
+    `Referrer-Policy: no-referrer` (the client page links out, and the default
+    would hand the token to the destination's logs), a 30-day post-trip expiry on
+    `/client/<token>` and `/history/<id>`, first-name-only on the rendered page,
+    and a 200-per-5-minutes-per-IP limit on both public routes.
+
 ---
 
 ## 7. Key decisions & gotchas
 
 - **Prices are totals everywhere internally**; `target_price` is a total. UI/
   alerts show **per-person** (÷ passengers) because that's how targets are set.
+- **A client link stops working 30 days after the last date it covers.** This is
+  `CLIENT_PAGE_TTL_DAYS` in `app.py`, enforced by `_token_expired` on both
+  `/client/<token>` and `/history/<id>`, and it looks exactly like a broken link
+  when it fires. One live or recent watch keeps the whole page up, and adding a
+  new watch for that client brings it back on its own — no token reissue needed.
+  Expired and unknown tokens return the *same* 404 page on purpose, so probing
+  can't confirm a token was ever real.
+- **The public routes are rate-limited to 200 requests per 5 minutes per IP**
+  (`PUBLIC_RATE_LIMIT` / `PUBLIC_RATE_WINDOW`, in-memory, keyed on `remote_addr`
+  via ProxyFix). Sized around a real household: the client page auto-refreshes
+  every 5 minutes and fires one `/history` call per watch. It is a speed bump on
+  top of the token's 128 bits, not the access control. Single gunicorn worker, so
+  the dict is process-global; a Render spin-down resets it, which is fine.
+- **`generate_tokens.py` invalidates every existing client link.** It reissues
+  all tokens across `watches` and `hotel_watches` in one pass and prints the new
+  URLs. Have the "here's your new link" message ready before running it.
 - **Alert rule:** fire when a stop tier is **at/below target** AND beats the
   **lowest price we've successfully ALERTED for that tier** — the dedup baseline,
   read from `sent_alerts.alerted_price_*` (via `get_alerted_tier_lows`), **NOT**
