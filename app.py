@@ -20,10 +20,13 @@ Configuration comes entirely from environment variables (see .env.example).
 """
 import os
 import datetime
+import re
+import secrets
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import (Flask, Response, flash, jsonify, redirect, render_template,
+                   request, session, url_for)
 from supabase import Client, create_client
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -47,6 +50,34 @@ supabase: Client = create_client(
 )
 
 APP_PASSWORD = os.environ["APP_PASSWORD"]
+
+
+@app.after_request
+def _privacy_headers(resp):
+    """Keep client pages out of search indexes, and stop the browser leaking
+    the URL onward.
+
+    A /client/<token> page is protected only by the secret in its URL. Two ways
+    that secret escapes without anyone doing anything wrong:
+
+    * X-Robots-Tag — a link that lands anywhere crawlable (a forwarded email
+      that gets archived publicly, a paste in a shared doc) becomes a search
+      result for the client's name. Nothing on FareWatch belongs in an index,
+      admin pages included, so this goes on every response rather than per-route.
+    * Referrer-Policy — the client page links out to airlines and hotels. By
+      default the browser sends the full current URL in the Referer header, so
+      one click hands the token to a third party's access logs.
+    """
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    """Belt and braces with the X-Robots-Tag header above: a crawler that reads
+    this never requests a client page at all."""
+    return Response("User-agent: *\nDisallow: /\n", mimetype="text/plain")
 
 
 @app.errorhandler(405)
@@ -341,10 +372,27 @@ def index():
                            recent_alerts=recent_alerts)
 
 
+def _make_token(client_name=""):
+    """Build a client-page token: a short readable prefix plus 128 bits of
+    randomness.
+
+    The token IS the access control for /client/<token> — there is no login —
+    so the random half has to be unguessable. It used to be 4 hex characters
+    (65,536 possibilities) behind the client's full name; once the name was
+    known, a script could walk the whole space in minutes. secrets.token_urlsafe(16)
+    makes that space 2^128.
+
+    The prefix is the first name only. A token travels through browser history,
+    bookmarks, and anywhere the client forwards it, and none of those need the
+    client's surname to be legible to Anna on the dashboard.
+    """
+    first = re.sub(r'[^a-z0-9]+', '-', client_name.lower()).strip('-').split('-')[0] or "client"
+    return f"{first}-{secrets.token_urlsafe(16)}"
+
+
 def _get_or_create_token(client_email, client_name=""):
     """Return this client's existing token (shared across flight AND hotel watches
-    by email), or generate a new readable one."""
-    import uuid, re
+    by email), or generate a new one."""
     for table in ("watches", "hotel_watches"):
         existing = (
             supabase.table(table)
@@ -357,9 +405,7 @@ def _get_or_create_token(client_email, client_name=""):
         )
         if existing and existing[0].get("client_token"):
             return existing[0]["client_token"]
-    slug = re.sub(r'[^a-z0-9]+', '-', client_name.lower()).strip('-') or "client"
-    suffix = uuid.uuid4().hex[:4]
-    return f"{slug}-{suffix}"
+    return _make_token(client_name)
 
 
 @app.route("/api/route-stats")
