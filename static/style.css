@@ -48,6 +48,11 @@
   --g700:#1A5831; --g900:#013019;
   /* ink ramp — shared neutral */
   --i200:#DEDDE1; --i300:#CAC8CD; --i500:#86838B; --i700:#4B4950; --i900:#28262A;
+  /* lilac — decorative field only. Violet MEANS technical craft in this system,
+     so it never becomes an accent here; it is a shape in the background and
+     nothing else. v100 is a permitted text ground (i900 12.68:1, i700 7.50:1,
+     g700 7.15:1); v200 is not (i700 falls to 6.50:1) and is not used. */
+  --v100:#F3E8FC;
 
   --accent:          var(--g700);
   --accent-light:    var(--g100);
@@ -73,6 +78,42 @@
   --font-serif: 'Faustina', Georgia, serif;
   --font-mono:  'DM Mono', ui-monospace, monospace;  /* figures stay tabular */
   --radius: 12px;
+}
+
+/* Decorative fields, the af Klint move from annaknoll.com/travel: fully opaque
+   circles bleeding off the top corners, so the page is not an unbroken sheet of
+   green. Opaque because the contract forbids alpha on a decorative field —
+   overlapping translucent fields make composite colours no table can enumerate.
+   Every colour a header line can land on (g50, g100, v100) is a checked ground. */
+body.client-theme { position: relative; overflow-x: hidden; }
+
+/* No overflow:hidden and no height here on purpose. Clipping the circles to a
+   fixed box gives them a flat cut edge, which is obvious on a short page like
+   client_not_found. Horizontal bleed is contained by overflow-x on the body
+   above; vertical bleed just leaves the viewport, which is the intended look. */
+.client-theme .client-fields {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.client-theme .cf { position: absolute; display: block; border-radius: 50%; }
+.client-theme .cf-green { width: 430px; height: 430px; background: var(--g100);
+                          left: -195px; top: -175px; }
+.client-theme .cf-lilac { width: 300px; height: 300px; background: var(--v100);
+                          right: -125px; top: -105px; }
+.client-theme .cf-lilac-lo { width: 260px; height: 260px; background: var(--v100);
+                             left: -130px; top: 250px; }
+
+/* Content rides above the fields. Cards are opaque, so only the header text
+   ever sits directly on one. */
+.client-theme .client-page { position: relative; z-index: 1; }
+
+@media (max-width: 560px) {
+  .client-theme .cf-green { width: 300px; height: 300px; left: -150px; top: -130px; }
+  .client-theme .cf-lilac { width: 210px; height: 210px; right: -95px; top: -80px; }
+  .client-theme .cf-lilac-lo { display: none; }
 }
 
 /* The contract's focus ring, on every control the client page has. */
