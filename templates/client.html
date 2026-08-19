@@ -38,9 +38,9 @@
     .client-header { margin-bottom: 36px; }
     .client-logo { font-family: var(--font-serif); font-size: 18px; color: var(--muted); margin-bottom: 20px; }
     .client-logo span { color: var(--accent); font-style: italic; }
-    .client-title { font-family: var(--font-serif); font-size: 32px; font-weight: normal; margin-bottom: 4px; }
+    .client-title { font-family: var(--font-serif); font-size: 32px; font-weight: 600; line-height: 1.1; margin-bottom: 4px; text-wrap: balance; }
     .client-name { font-size: 18px; color: var(--muted); margin-bottom: 6px; }
-    .client-subtitle { font-size: 13px; color: #bbb; }
+    .client-subtitle { font-size: 13px; color: var(--muted); }
     .client-updated { font-size: 12px; color: var(--muted); margin-top: 12px; }
 
     .client-cards { display: flex; flex-direction: column; gap: 20px; margin-bottom: 40px; }
@@ -66,6 +66,10 @@
       padding: 6px 14px;
       border-radius: 6px;
     }
+    /* Must come after .target-banner — same specificity, so source order is
+       what decides. Paused reads as paused from the word either way, but it
+       should not wear the same green as a fare that hit its target. */
+    .target-banner-paused { background: var(--i200); color: var(--text); }
 
     .client-route {
       font-family: var(--font-mono);
@@ -112,7 +116,7 @@
 
     .client-history-toggle {
       background: none;
-      border: 0.5px solid var(--border);
+      border: 1px solid var(--control-border);
       border-radius: 6px;
       font-family: var(--font-sans);
       font-size: 12px;
@@ -120,6 +124,8 @@
       padding: 5px 12px;
       cursor: pointer;
       width: fit-content;
+      min-height: 44px;
+      padding-inline: 16px;
     }
     .client-history-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -134,19 +140,25 @@
     .client-footer-brand {
       margin-top: 20px;
       font-size: 12px;
-      color: #ccc;
+      color: var(--muted);
     }
     .client-footer-logo { font-family: var(--font-serif); }
     .client-footer-logo span { color: var(--accent); font-style: italic; }
   </style>
 </head>
-<body style="background:var(--bg)">
+<body class="client-theme" style="background:var(--bg)">
 
-<div class="client-page">
+<div class="client-fields" aria-hidden="true">
+  <span class="cf cf-green"></span>
+  <span class="cf cf-lilac"></span>
+  <span class="cf cf-lilac-lo"></span>
+</div>
+
+<main id="main" class="client-page">
 
   <div class="client-header">
     <div class="client-logo">fare<span>watch</span></div>
-    <div class="client-title">Your fare watches</div>
+    <h1 class="client-title">Your fare watches</h1>
     <div class="client-name">{{ client_name }}</div>
     <div class="client-subtitle">Monitored by Anna Knoll · Fora Travel</div>
     <div class="client-updated">Last updated: {{ updated_at }} · Auto-refreshes every 5 minutes</div>
@@ -169,7 +181,7 @@
           {{ w.origin }}<span class="arrow">→</span>{{ w.destination }}
         </div>
         {% if w.is_paused %}
-          <div class="target-banner" style="background:#f5f5f5;color:var(--muted);">⏸ Paused</div>
+          <div class="target-banner target-banner-paused">⏸ Paused</div>
         {% elif hit_target %}
           <div class="target-banner">🎯 Target reached!</div>
         {% endif %}
@@ -250,7 +262,7 @@
       <div class="client-card-top">
         <div class="client-route" style="font-size:22px;">{{ hw.accommodation_name }}</div>
         {% if not hw.is_active %}
-          <div class="target-banner" style="background:#f5f5f5;color:var(--muted);">⏸ Paused</div>
+          <div class="target-banner target-banner-paused">⏸ Paused</div>
         {% elif hit_target %}
           <div class="target-banner">🎯 Target reached!</div>
         {% endif %}
@@ -302,16 +314,28 @@
     </div>
   </div>
 
-</div>
+</main>
 
 <script>
 const clientCharts = {};
 
+// Colours come from the .client-theme custom properties so the chart can never
+// drift from the palette the rest of the page is using.
+const _css = (name) => getComputedStyle(document.body).getPropertyValue(name).trim();
+
 function _stopColor(s) {
-  if (s === null || s === undefined) return '#cccccc';
-  if (s === 0) return '#1D9E75';
-  if (s === 1) return '#e8a020';
-  return '#e05252';
+  if (s === null || s === undefined) return _css('--tier-unknown');
+  if (s === 0) return _css('--tier-nonstop');
+  if (s === 1) return _css('--tier-1stop');
+  return _css('--tier-2plus');
+}
+// Shape carries the same information as colour. Three hues this close together
+// (1.2:1 apart) are one grayscale print away from being identical.
+function _stopShape(s) {
+  if (s === null || s === undefined) return 'crossRot';
+  if (s === 0) return 'circle';
+  if (s === 1) return 'triangle';
+  return 'rect';
 }
 function _stopLabel(s) {
   if (s === null || s === undefined) return '';
@@ -348,13 +372,13 @@ async function toggleClientHistory(watchId, btn, passengers) {
     <div style="display:flex;gap:20px;margin:12px 0 6px;">
       <div style="font-size:12px;color:var(--muted)">current<strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:17px">$${current}</strong></div>
       <div style="font-size:12px;color:var(--muted)">lowest seen<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:17px">$${min}</strong></div>
-      <div style="font-size:12px;color:var(--muted)">highest seen<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:17px">$${max}</strong></div>
+      <div style="font-size:12px;color:var(--muted)">highest seen<strong style="font-family:var(--font-mono);color:var(--tier-2plus);display:block;font-size:17px">$${max}</strong></div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">
-      ${perPerson ? 'per person · ' : ''}point colour = stops:
-      <span style="color:#1D9E75">● nonstop</span>
-      <span style="color:#e8a020">● 1 stop</span>
-      <span style="color:#e05252">● 2+</span>
+      ${perPerson ? 'per person · ' : ''}stops:
+      <span style="color:var(--tier-nonstop)" aria-hidden="true">●</span> nonstop
+      <span style="color:var(--tier-1stop)" aria-hidden="true">▲</span> 1 stop
+      <span style="color:var(--tier-2plus)" aria-hidden="true">■</span> 2+
     </div>
     <div style="position:relative;height:160px;">
       <canvas id="client-chart-${watchId}"></canvas>
@@ -367,10 +391,11 @@ async function toggleClientHistory(watchId, btn, passengers) {
       labels,
       datasets: [{
         data: prices,
-        borderColor: '#cfcfcf',
+        borderColor: _css('--chart-line'),
         backgroundColor: 'rgba(0,0,0,0.03)',
         pointRadius: 5,
-        pointHoverRadius: 6,
+        pointHoverRadius: 7,
+        pointStyle: stops.map(_stopShape),
         pointBackgroundColor: stops.map(_stopColor),
         pointBorderColor: stops.map(_stopColor),
         tension: 0.3,
