@@ -1,5 +1,8 @@
 /* ─── Google Fonts ─────────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600&display=swap');
+/* Faustina + Karla are annaknoll.com's pair, used by the client page only
+   (see the .client-theme block below). The admin dashboard keeps Syne/DM. */
+@import url('https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600;700&family=Karla:wght@400;500;700&display=swap');
 
 /* ─── Variables ─────────────────────────────────────────────────────────────── */
 :root {
@@ -16,6 +19,80 @@
   --font-serif:  'DM Serif Display', serif;
   --font-mono:   'DM Mono', monospace;
   --radius:      10px;
+}
+
+/* ─── Client-page theme ─────────────────────────────────────────────────────
+   The public /client/<token> page is now the last screen of a funnel that
+   starts on annaknoll.com/travel, so it wears that site's palette and type
+   instead of FareWatch's own. Scoped to .client-theme on <body>: the admin
+   dashboard nobody sees keeps the green/Syne look above.
+
+   This is not only a recolour. The FareWatch defaults fail the accessibility
+   contract badly on a white card — --muted #888 is 3.54:1, --accent #1D9E75 is
+   3.39:1, and the subtitle at #bbb is 1.92:1, all against a 7:1 requirement.
+   Every pair below was measured.
+
+     --text     i900 on white 14.99:1 · on page 13.84:1
+     --muted    i700 on white  8.87:1 · on page  8.19:1 · on banner 7.60:1
+     --accent   g700 on white  8.45:1 · on page  7.81:1 · on banner 7.25:1
+     --card-border  i200, decorative hairline only, carries no meaning
+     --control-border i500 on white 3.73:1, for real control edges
+     --focus    g900 on white 14.60:1
+
+   Chart tiers are >=3:1 on white as glyphs and are ALSO differentiated by point
+   shape, because three hues 1.2:1 apart from each other vanish in grayscale.
+   ─────────────────────────────────────────────────────────────────────────── */
+.client-theme {
+  /* green ramp — travel craft */
+  --g50:#F0F8F0; --g100:#E4F1E4; --g200:#D0E5D0; --g500:#599564;
+  --g700:#1A5831; --g900:#013019;
+  /* ink ramp — shared neutral */
+  --i200:#DEDDE1; --i300:#CAC8CD; --i500:#86838B; --i700:#4B4950; --i900:#28262A;
+
+  --accent:          var(--g700);
+  --accent-light:    var(--g100);
+  --text:            var(--i900);
+  --muted:           var(--i700);
+  --border:          var(--i200);   /* decorative card hairline */
+  --control-border:  var(--i500);   /* control edges, >=3:1 */
+  --bg:              var(--g50);
+  --card-bg:         #FFFFFF;
+  --focus:           var(--g900);
+
+  /* Stop tiers. Paired with distinct point shapes in the chart. */
+  --tier-nonstop:  var(--g700);   /* 8.45:1 */
+  --tier-1stop:    #8A5A00;       /* 5.93:1 */
+  --tier-2plus:    #A32C22;       /* 7.14:1 */
+  --tier-unknown:  var(--i500);   /* 3.73:1 */
+  --chart-line:    var(--i300);
+
+  --red:   var(--tier-2plus);
+  --amber: var(--tier-1stop);
+
+  --font-sans:  'Karla', system-ui, sans-serif;
+  --font-serif: 'Faustina', Georgia, serif;
+  --font-mono:  'DM Mono', ui-monospace, monospace;  /* figures stay tabular */
+  --radius: 12px;
+}
+
+/* The contract's focus ring, on every control the client page has. */
+.client-theme a:focus-visible,
+.client-theme button:focus-visible,
+.client-theme summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* At 375px the price and the target squeeze side by side and both wrap mid-
+   phrase ("your target / person" over two lines). Stack them instead.
+   Scoped to .client-theme, so the admin dashboard's layout is untouched. */
+@media (max-width: 480px) {
+  .client-theme .client-prices { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .client-theme .client-price-target { text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .client-theme * { transition: none !important; animation: none !important; }
 }
 
 /* ─── Reset ─────────────────────────────────────────────────────────────────── */
@@ -228,7 +305,7 @@ input, select { font-family: var(--font-sans); }
 
 /* Fare-options table: cheapest fare per stop level, each row expandable */
 .tier-table { margin-top: 4px; }
-.tier-table-label { font-size: 11px; color: #aaa; margin-bottom: 2px; }
+.tier-table-label { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .tier-row { border-top: 0.5px solid var(--border); }
 .tier-row:last-child { border-bottom: 0.5px solid var(--border); }
 .tier-row > summary {
@@ -252,7 +329,14 @@ input, select { font-family: var(--font-sans); }
 .tier-row .tier-name { color: var(--muted); }
 .tier-row .tier-price { margin-left: auto; font-weight: 500; }
 .tier-row.tier-best .tier-name,
-.tier-row.tier-best .tier-price { color: var(--accent); font-weight: 600; }
+.tier-row.tier-best .tier-price { color: var(--accent); font-weight: 700; }
+/* "This is the fare we're quoting" was carried by colour alone: at 500 vs 600 the
+   weight difference is invisible, so the state vanished under grayscale(1).
+   700 plus a keyline makes it survive without colour. */
+.client-theme .tier-row.tier-best {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.client-theme .tier-row.tier-best > summary { padding-left: 12px; }
 .tier-detail {
   font-size: 12px;
   color: var(--muted);

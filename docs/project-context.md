@@ -206,12 +206,39 @@ currently `REDACTED`.
     `/client/<token>` and `/history/<id>`, first-name-only on the rendered page,
     and a 200-per-5-minutes-per-IP limit on both public routes.
 
+23. **Client page wears the annaknoll palette (2026-08-18)** — `/client/<token>` is
+    now the last screen of a funnel that starts at annaknoll.com/travel, so it uses
+    that site's green/ink tokens and Faustina + Karla instead of FareWatch's own
+    green/Syne. Scoped to `.client-theme` on `<body>` in `static/style.css`; the
+    admin dashboard is deliberately untouched, because nobody but Anna sees it.
+    Not only a recolour — the old defaults failed the accessibility contract badly
+    on a white card (`--muted` #888 at 3.54:1, `--accent` #1D9E75 at 3.39:1,
+    `.client-subtitle` #bbb at 1.92:1, against a 7:1 requirement). Every pair now
+    measures ≥7:1. Also: `<h1>` and a `<main>` landmark where there were neither,
+    the history toggle is a 44px control with a ≥3:1 edge, and chart stop-tiers get
+    distinct point *shapes* as well as colours because three hues 1.2:1 apart from
+    each other are identical in grayscale.
+
 ---
 
 ## 7. Key decisions & gotchas
 
 - **Prices are totals everywhere internally**; `target_price` is a total. UI/
   alerts show **per-person** (÷ passengers) because that's how targets are set.
+- **Clients created before 2026-08-18 still carry 16-bit tokens.** The entropy fix
+  only affects tokens minted after it deployed, and `_get_or_create_token` reuses a
+  client's existing token by email — so adding a new watch for an old client hands
+  them the same short token again. Anna decided on 2026-08-18 to defer the rotation
+  rather than reissue every link; running `generate_tokens.py` is what clears it.
+  Note the rotation is cheaper than it looks: alert emails build the client link
+  fresh from the token at send time, so the next alert re-links everyone
+  automatically and only people who bookmarked the page would notice.
+- **The client page has its own theme, the dashboard does not.** `.client-theme` on
+  `<body>` in `client.html` / `client_not_found.html` redefines the palette tokens.
+  Editing a shared component in `style.css` therefore lands on two different-looking
+  pages; check both. Anything that must hold its contrast in the client theme needs
+  a token, not a hex literal — the chart reads its colours out of the custom
+  properties for exactly this reason.
 - **A client link stops working 30 days after the last date it covers.** This is
   `CLIENT_PAGE_TTL_DAYS` in `app.py`, enforced by `_token_expired` on both
   `/client/<token>` and `/history/<id>`, and it looks exactly like a broken link
