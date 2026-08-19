@@ -22,6 +22,8 @@ import os
 import datetime
 import re
 import secrets
+import threading
+import time
 from functools import wraps
 
 from dotenv import load_dotenv
@@ -50,6 +52,103 @@ supabase: Client = create_client(
 )
 
 APP_PASSWORD = os.environ["APP_PASSWORD"]
+
+
+# How long a client page stays reachable after the last date it covers. The
+# token never changes, so without this every link Anna has ever handed out stays
+# live forever — a pile of standing exposure that only grows. 30 days leaves room
+# to look back at a trip that just happened.
+CLIENT_PAGE_TTL_DAYS = 30
+
+# Fixed-window rate limit for the two public routes, shared per IP.
+# Generous on purpose: a client page auto-refreshes every 5 minutes and fires one
+# /history call per watch, so a household with several watches makes a real
+# burst. This is a speed bump layered on top of the token's 128 bits, not the
+# thing holding the door shut. gunicorn runs a single worker here, so a
+# module-level dict is process-global; Render's free plan spinning down just
+# resets it.
+PUBLIC_RATE_LIMIT = 200
+PUBLIC_RATE_WINDOW = 300  # seconds
+
+_rate_buckets = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limited(key):
+    """Count this hit and report whether the caller is over the limit.
+
+    Fixed window: the first request in a window starts the clock and the count
+    resets when it lapses. Expired buckets are pruned on the way through, so the
+    dict stays the size of the currently-active caller set.
+    """
+    now = time.monotonic()
+    with _rate_lock:
+        for k, (started, _) in list(_rate_buckets.items()):
+            if now - started > PUBLIC_RATE_WINDOW:
+                del _rate_buckets[k]
+        started, count = _rate_buckets.get(key, (now, 0))
+        if now - started > PUBLIC_RATE_WINDOW:
+            started, count = now, 0
+        count += 1
+        _rate_buckets[key] = (started, count)
+        over = count > PUBLIC_RATE_LIMIT
+        retry_after = int(PUBLIC_RATE_WINDOW - (now - started)) + 1
+    return over, retry_after
+
+
+def rate_limit(view):
+    """Apply the public rate limit to a route, keyed on the caller's IP.
+
+    ProxyFix is configured with x_for=1, so remote_addr is the real client IP
+    rather than Render's proxy.
+    """
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        over, retry_after = _rate_limited(request.remote_addr or "unknown")
+        if over:
+            return Response(
+                "Too many requests. Try again in a few minutes.\n",
+                status=429,
+                mimetype="text/plain",
+                headers={"Retry-After": str(retry_after)},
+            )
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _first_name(full_name):
+    """The client page greets the client; it does not need to prove it knows
+    their surname. The page is reachable by anyone holding the link, so the
+    less it says about who the person is, the less a leaked link is worth."""
+    return (full_name or "").strip().split(" ")[0]
+
+
+def _watch_end_date(w):
+    """The last calendar date a watch covers: the return window if it's a
+    round-trip, the outbound window otherwise, check-out for a hotel."""
+    for field in ("return_date_to", "check_out", "date_to"):
+        value = w.get(field)
+        if value:
+            return value
+    return None
+
+
+def _token_expired(rows):
+    """True when every watch under this token ended more than CLIENT_PAGE_TTL_DAYS
+    ago. A single live or recent trip keeps the whole page reachable, and adding
+    a new watch for that client brings it back on its own."""
+    cutoff = datetime.date.today() - datetime.timedelta(days=CLIENT_PAGE_TTL_DAYS)
+    end_dates = []
+    for w in rows:
+        raw = _watch_end_date(w)
+        if raw:
+            try:
+                end_dates.append(datetime.date.fromisoformat(str(raw)[:10]))
+            except ValueError:
+                return False  # unparseable date: fail open rather than lock a client out
+    if not end_dates:
+        return False
+    return max(end_dates) < cutoff
 
 
 @app.after_request
@@ -679,16 +778,21 @@ def deactivate_watch(watch_id):
 
 
 @app.route("/history/<watch_id>")
+@rate_limit
 def watch_history(watch_id):
     """Return this watch's price history as JSON (oldest→newest) for the inline
     Chart.js price chart — limited to the current trip epoch (see
     params_changed_at) so an edited watch doesn't blend two trips on one line."""
     w = (
         supabase.table("watches")
-        .select("params_changed_at")
+        .select("params_changed_at, date_to, return_date_to")
         .eq("id", watch_id).limit(1).execute().data
     )
-    pca = w[0]["params_changed_at"] if w else None
+    # Unauthenticated, like the client page it feeds — so it expires on the same
+    # rule. An unknown id 404s rather than returning an empty series.
+    if not w or _token_expired(w):
+        return jsonify([]), 404
+    pca = w[0]["params_changed_at"]
     q = (
         supabase.table("price_history")
         .select("price, currency, checked_at, stops_outbound, stops_inbound")
@@ -721,10 +825,13 @@ def hotel_history(hotel_id):
 
 
 @app.route("/client/<token>")
+@rate_limit
 def client_page(token):
     """Public, read-only status page for one client. No login — the token in
     the URL is the access control. Shows that client's flight AND hotel watches.
-    Returns a 404 page if the token matches nothing."""
+
+    Returns the same 404 page whether the token matches nothing or has expired,
+    so a probe can't learn that a token was ever real."""
     watches = (
         supabase.table("watches")
         .select("*")
@@ -742,6 +849,8 @@ def client_page(token):
         .data
     )
     if not watches and not hotel_watches:
+        return render_template("client_not_found.html"), 404
+    if _token_expired(watches + hotel_watches):
         return render_template("client_not_found.html"), 404
 
     _attach_hotel_extras(hotel_watches)
@@ -764,7 +873,7 @@ def client_page(token):
         if watch["latest_price"]:
             watch["latest_price"]["stops_text"] = _stops_text(watch["latest_price"], watch.get("trip_type"))
 
-    client_name = (watches or hotel_watches)[0].get("client_name")
+    client_name = _first_name((watches or hotel_watches)[0].get("client_name"))
     updated_at = datetime.datetime.now().strftime("%-d %B %Y at %-I:%M %p")
     return render_template("client.html",
                            watches=watches,
