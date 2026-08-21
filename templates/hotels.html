@@ -71,7 +71,31 @@
 {# ─────────────── Add hotel form ─────────────── #}
 <div id="add-hotel" class="add-form" style="display:none;">
   <form method="POST" action="/add_hotel" onsubmit="return validateHotel();">
-    <div class="form-grid">
+    {# Primary: free-text place search. /data/hotels ANDs cityName with hotelName
+       and matches a hotel's *registered* city, which is why "Hilton Garden Inn"
+       + London finds nothing (Heathrow files under Hounslow). /data/places is
+       Google-backed and forgiving. #}
+    <div class="form-grid" style="grid-template-columns: 3fr auto;">
+      <div class="form-field">
+        <label>find a hotel by name or place</label>
+        <input type="text" id="place_q" placeholder="Hilton Garden Inn Heathrow"
+               autocomplete="off" style="text-transform:none"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlaces();}">
+      </div>
+      <div class="form-field" style="align-self:end;">
+        <button type="button" class="btn-sm accent" onclick="searchPlaces()">search</button>
+      </div>
+    </div>
+    <div class="form-field" id="place_wrap" style="margin-top:10px;display:none;">
+      <label>matching places</label>
+      <select id="place_select" onchange="pickPlace()"></select>
+    </div>
+
+    <details style="margin-top:12px;">
+      <summary class="muted" style="cursor:pointer;font-size:13px;">
+        or browse by city / country
+      </summary>
+    <div class="form-grid" style="margin-top:10px;">
       <div class="form-field">
         <label>city</label>
         <!-- text-transform:none — the global .form-field rule uppercases text
@@ -90,6 +114,7 @@
         <button type="button" class="btn-sm accent" onclick="searchHotels()">search hotels</button>
       </div>
     </div>
+    </details>
 
     <div class="form-field" style="margin-top:10px;">
       <label>hotel</label>
@@ -167,6 +192,74 @@
 </div>{# /.page #}
 
 <script>
+// ── Place search (primary path) ──────────────────────────────────────────────
+// Two steps on purpose: /data/places finds the property forgivingly, then its
+// place_id resolves to the LiteAPI hotel records we need an id from.
+function fillHotelSelect(sel, hotels, fallbackCity, fallbackCountry) {
+  sel.innerHTML = '';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = '— pick a hotel —';
+  sel.appendChild(blank);
+  hotels.forEach(h => {
+    const o = document.createElement('option');
+    o.value = h.id;
+    o.textContent = h.name + (h.city ? ` — ${h.city}` : '');
+    o.dataset.name = h.name;
+    o.dataset.city = h.city || fallbackCity || '';
+    o.dataset.country = h.country || fallbackCountry || '';
+    sel.appendChild(o);
+  });
+}
+
+async function searchPlaces() {
+  const q = document.getElementById('place_q').value.trim();
+  const wrap = document.getElementById('place_wrap');
+  const psel = document.getElementById('place_select');
+  if (!q) { alert('Type a hotel name or place to search for.'); return; }
+  wrap.style.display = '';
+  psel.innerHTML = '<option value="">searching…</option>';
+  try {
+    const res = await fetch('/hotels/places?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    psel.innerHTML = '';
+    if (data.error || !data.places.length) {
+      psel.innerHTML = `<option value="">${data.error || 'Nothing found'}</option>`;
+      return;
+    }
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '— pick the right one —';
+    psel.appendChild(blank);
+    data.places.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.place_id;
+      // The address is the whole point — it's how you tell four Heathrow
+      // Hiltons apart.
+      o.textContent = p.address ? `${p.name} — ${p.address}` : p.name;
+      psel.appendChild(o);
+    });
+  } catch (e) {
+    psel.innerHTML = '<option value="">search failed — try again</option>';
+  }
+}
+
+async function pickPlace() {
+  const psel = document.getElementById('place_select');
+  const sel = document.getElementById('hotel_select');
+  if (!psel.value) return;
+  sel.innerHTML = '<option value="">finding hotels near there…</option>';
+  try {
+    const res = await fetch('/hotels/search?place_id=' + encodeURIComponent(psel.value));
+    const data = await res.json();
+    if (data.error || !data.hotels.length) {
+      sel.innerHTML = `<option value="">${data.error || 'No hotels found'}</option>`;
+      return;
+    }
+    fillHotelSelect(sel, data.hotels, '', '');
+  } catch (e) {
+    sel.innerHTML = '<option value="">lookup failed — try again</option>';
+  }
+}
+
 async function searchHotels() {
   const city = document.getElementById('city').value.trim();
   const country = document.getElementById('country').value.trim();
@@ -184,18 +277,7 @@ async function searchHotels() {
       sel.innerHTML = `<option value="">${data.error || 'No hotels found'}</option>`;
       return;
     }
-    const blank = document.createElement('option');
-    blank.value = ''; blank.textContent = '— pick a hotel —';
-    sel.appendChild(blank);
-    data.hotels.forEach(h => {
-      const o = document.createElement('option');
-      o.value = h.id;
-      o.textContent = h.name + (h.city ? ` — ${h.city}` : '');
-      o.dataset.name = h.name;
-      o.dataset.city = h.city || city;
-      o.dataset.country = h.country || country;
-      sel.appendChild(o);
-    });
+    fillHotelSelect(sel, data.hotels, city, country);
   } catch (e) {
     sel.innerHTML = '<option value="">search failed — try again</option>';
   }
