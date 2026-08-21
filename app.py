@@ -682,9 +682,8 @@ def add_hotel():
         "check_in": check_in,
         "check_out": check_out,
         "guests": int(request.form.get("guests", 1)),
-        "rooms": int(request.form.get("rooms", 1)),
         "refundable_only": request.form.get("refundable_only") == "on",
-        "target_price_per_night_per_person": round(float(request.form["target_price_per_night_per_person"]), 2),
+        "target_price_per_night": round(float(request.form["target_price_per_night"]), 2),
         "watch_mode": 1,
         "client_name": client_name,
         "client_email": client_email,
@@ -865,7 +864,7 @@ def hotel_history(hotel_id):
     chart. Kept off the client page — hotel history is visible to Anna only."""
     rows = (
         supabase.table("hotel_price_history")
-        .select("per_night_per_person_amount, per_night_amount, total_amount, "
+        .select("per_night_amount, total_amount, "
                 "currency, checked_at, nights, refundable, rate_name")
         .eq("hotel_watch_id", hotel_id)
         .order("checked_at", desc=False)

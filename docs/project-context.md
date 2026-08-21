@@ -363,6 +363,28 @@ currently `REDACTED`.
   `POST /hotels/min-rates` evaluated + **rejected** (too lean — no refundable
   filter, no rate/board detail). Still deferred: storing `paymentTypes`, pinning
   board per watch.
+- **Hotels are tracked PER NIGHT, not per person (2026-08-21).** Hotels sell
+  room-nights — a queen room costs the same whether one or two people sleep in it.
+  Per-person was a *flights* idiom (fares really are per passenger) carried across
+  when hotels were built alongside them, and it also misread on the card: an $802
+  two-night stay for two showed as "$201/night/person", which looks like a nightly
+  rate that doesn't reconcile with the total. Target is now
+  `hotel_watches.target_price_per_night`; the tracked figure is
+  `hotel_price_history.per_night_amount` (total ÷ nights). Old columns kept but
+  nullable and unwritten. Card shows 2dp so `nightly × nights = total` checks by eye.
+- **`rooms` is retired, and multi-room never worked.** LiteAPI returns one
+  `retailRate.total` **per occupancy** — "that specific room's price alone" — and
+  expects the caller to sum them by `occupancyNumber`. `get_lowest_hotel_rate` took
+  `min()` across all rates, so a 2-room watch would have stored the cheaper single
+  room's price as the stay total, then divided it by every guest. Every watch to
+  date is `rooms=1`, so nothing recorded was affected. `_build_occupancies` is now
+  deliberately single-room. **If multi-room is ever wanted, it needs real work**
+  (group by `occupancyNumber`, cheapest per room, sum) — not just re-adding the field.
+- **`retailRate.total` includes taxes flagged `included: true` only.** Their
+  `taxesAndFees` array carries a per-line `included` boolean, and anything false is
+  **charged separately at the property** (city tax, resort fee). We don't capture
+  that array, so a client-facing figure can understate what they actually pay.
+  Worth fixing before hotel rates go in front of clients at scale.
 - **Hotel picker: `countryCode` is ISO-3166 alpha-2, and "UK" is not one** (GB is).
   The two-letter box makes near-misses look correct, and LiteAPI answers an
   unmatched code with **HTTP 200 and an empty list** — indistinguishable from "this

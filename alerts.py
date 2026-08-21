@@ -15,8 +15,10 @@ One notification names all the tiers that improved.
 Everything degrades gracefully: a missing key or a failed request returns False
 instead of raising, so one channel breaking never blocks the others.
 
-Prices passed in are TOTALS (all passengers); messages show the per-person figure
-since that's what the target is set in.
+Flight prices passed in are TOTALS (all passengers); messages show the per-person
+figure since that's what a flight target is set in. Hotels are the opposite: they
+sell room-nights, so hotel messages show the nightly ROOM rate and never divide by
+guests.
 """
 import os
 import urllib.parse
@@ -452,8 +454,8 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
     name = hw["accommodation_name"]
     city = hw.get("accommodation_city") or ""
     client_name = hw.get("client_name") or "there"
-    ppp = rate["per_night_per_person_amount"]
-    target = float(hw["target_price_per_night_per_person"])
+    nightly = rate["per_night_amount"]
+    target = float(hw["target_price_per_night"])
     nights = rate["nights"]
     guests = hw["guests"]
     refund = _refund_label(rate.get("refundable"))
@@ -462,7 +464,7 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
 
     if previous_low is not None:
         note = (f'<span style="color:#2a7a2a;font-weight:normal;font-size:13px;">'
-                f' ▼ down from {currency} {previous_low:,.0f}/night/person</span>')
+                f' ▼ down from {currency} {previous_low:,.0f}/night</span>')
     else:
         note = '<span style="color:#2a7a2a;font-weight:normal;font-size:13px;"> (new!)</span>'
 
@@ -480,12 +482,12 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
   <p>Hi {client_name},</p>
   <p>Good news — a better rate just turned up for <strong>{name}</strong>{f' in {city}' if city else ''}:</p>
   <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
-    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {ppp:,.0f}/night/person{note}</div>
+    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {nightly:,.0f}/night{note}</div>
     <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'}{board_html} · total {currency} {rate['total_amount']:,.0f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
   </div>
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Stay</td><td style="padding:4px 0;text-align:right;">{hw['check_in']} – {hw['check_out']} ({guests} guest{'s' if guests != 1 else ''})</td></tr>
-    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target:,.0f}/night/person</td></tr>
+    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target:,.0f}/night</td></tr>
   </table>
   <p style="margin:16px 0 4px;"><a href="{google}" style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">View hotel on Google →</a></p>
   <p style="font-size:12px;color:#888;">This is the lowest rate we observed on the last check — hotel rates are live and can change until booked.</p>
@@ -502,22 +504,22 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
 def _build_hotel_alert_text(hw, rate, previous_low, currency):
     name = hw["accommodation_name"]
     city = hw.get("accommodation_city") or ""
-    ppp = rate["per_night_per_person_amount"]
-    target = float(hw["target_price_per_night_per_person"])
+    nightly = rate["per_night_amount"]
+    target = float(hw["target_price_per_night"])
     nights = rate["nights"]
-    note = (f" (down from {currency} {previous_low:,.0f}/night/person)"
+    note = (f" (down from {currency} {previous_low:,.0f}/night)"
             if previous_low is not None else " (new!)")
     refund = _refund_label(rate.get("refundable"))
     lines = [
         f"Hi {hw.get('client_name') or 'there'},", "",
         f"Good news — a better rate just turned up for {name}{f' in {city}' if city else ''}:", "",
-        f"{currency} {ppp:,.0f}/night/person{note}",
+        f"{currency} {nightly:,.0f}/night{note}",
         f"  {rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night(s)"
         + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         "",
         f"Stay: {hw['check_in']} – {hw['check_out']} ({hw['guests']} guest(s))",
-        f"Your target: {currency} {target:,.0f}/night/person",
+        f"Your target: {currency} {target:,.0f}/night",
         "",
         f"View hotel: {_google_hotel_url(name, city)}",
         "",
@@ -536,11 +538,11 @@ def send_hotel_alert(hotel_watch, rate, previous_low=None):
     """
     currency = rate.get("currency") or "USD"
     name = hotel_watch["accommodation_name"]
-    ppp = rate["per_night_per_person_amount"]
+    nightly = rate["per_night_amount"]
     client_email = (hotel_watch.get("client_email") or "").strip()
     client_name = hotel_watch.get("client_name") or ""
 
-    subject = f"Hotel alert: {name} — {currency} {ppp:,.0f}/night/person"
+    subject = f"Hotel alert: {name} — {currency} {nightly:,.0f}/night"
     html_body = _build_hotel_alert_html(hotel_watch, rate, previous_low, currency)
     text_body = _build_hotel_alert_text(hotel_watch, rate, previous_low, currency)
 
@@ -563,8 +565,8 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
     currency = rate.get("currency") or "USD"
     name = hotel_watch["accommodation_name"]
     city = hotel_watch.get("accommodation_city") or "—"
-    ppp = rate["per_night_per_person_amount"]
-    target = float(hotel_watch["target_price_per_night_per_person"])
+    nightly = rate["per_night_amount"]
+    target = float(hotel_watch["target_price_per_night"])
     # Label prices with the rate's own currency, like the email and the stored
     # history do — not a hardcoded "$". LiteAPI is asked for USD today, so this
     # is the same string in practice; it stops being so the moment a watch is
@@ -576,12 +578,12 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
     lines = [
         f"🏨 *New hotel low: {name}*",
         f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
-        f"*Lowest observed:* {currency} {ppp:,.0f}/night/person{note}",
+        f"*Lowest observed:* {currency} {nightly:,.0f}/night{note}",
         f"*{rate.get('rate_name') or 'Room'}:* total {currency} {rate['total_amount']:,.0f} for {rate['nights']} night(s)"
         + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",
-        f"*Target:* {currency} {target:,.0f}/night/person",
+        f"*Target:* {currency} {target:,.0f}/night",
         "_Rates are live and can change until booked._",
     ]
     payload = {
