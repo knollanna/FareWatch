@@ -4,7 +4,7 @@
 {# ─────────────── Hotel watch card macro ─────────────── #}
 {% macro hotel_card(hw, paused=False) %}
   {% set lp = hw.latest %}
-  {% set hit = lp and lp.per_night_per_person_amount <= hw.target_price_per_night_per_person %}
+  {% set hit = lp and lp.per_night_amount <= hw.target_price_per_night %}
   <div class="watch-card {{ 'target-met' if hit }}">
     <div class="card-badges">
       {% if paused %}<span class="badge badge-paused">paused</span>{% endif %}
@@ -14,20 +14,20 @@
     <div class="card-meta">
       {% if hw.accommodation_city %}<span>{{ hw.accommodation_city }}</span>{% endif %}
       <span>{{ hw.check_in }} – {{ hw.check_out }}</span>
-      <span>{{ hw.guests }} guest{{ 's' if hw.guests != 1 }}{% if hw.rooms != 1 %} · {{ hw.rooms }} rooms{% endif %}</span>
+      <span>{{ hw.guests }} guest{{ 's' if hw.guests != 1 }}</span>
       {% if hw.refundable_only %}<span>refundable only</span>{% endif %}
     </div>
 
     {% if lp %}
       <div class="card-price">
-        <strong>${{ "%.0f"|format(lp.per_night_per_person_amount) }}</strong>/night/person
-        <span class="muted">· total ${{ "%.0f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
+        <strong>${{ "%.2f"|format(lp.per_night_amount) }}</strong>/night
+        <span class="muted">· total ${{ "%.2f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
           {% if lp.rate_name %}· {{ lp.rate_name }}{% endif %}
           {% if lp.board_name %}· {{ lp.board_name }}{% endif %}
           {% if lp.refundable is not none %}· {{ 'refundable' if lp.refundable else 'non-refundable' }}{% endif %}</span>
       </div>
       <div class="card-meta">
-        <span>target ${{ "%.0f"|format(hw.target_price_per_night_per_person) }}/night/person</span>
+        <span>target ${{ "%.2f"|format(hw.target_price_per_night) }}/night</span>
         <span>{{ 'TARGET MET ✓' if hit else 'above target' }}</span>
       </div>
     {% else %}
@@ -141,18 +141,14 @@
         <label>guests</label>
         <input type="number" name="guests" min="1" max="20" value="2" required>
       </div>
-      <div class="form-field">
-        <label>rooms</label>
-        <input type="number" name="rooms" min="1" max="10" value="1" required>
-      </div>
       <div class="form-field" style="align-self:end;">
         <label><input type="checkbox" name="refundable_only" checked> refundable only</label>
       </div>
     </div>
     <div class="form-grid" style="margin-top:10px;">
       <div class="form-field">
-        <label>target price (per night, per person, USD)</label>
-        <input type="number" name="target_price_per_night_per_person" min="1" step="0.01" placeholder="200.00" required>
+        <label>target price (per night, USD)</label>
+        <input type="number" name="target_price_per_night" min="1" step="0.01" placeholder="400.00" required>
       </div>
     </div>
     <div class="form-grid" style="margin-top:10px;">
@@ -322,7 +318,7 @@ async function toggleHotelHistory(id, btn) {
     panel.innerHTML = '<em style="font-size:13px;color:var(--muted)">Not enough data yet — after a few more checks.</em>';
     return;
   }
-  const prices = data.map(d => parseFloat(d.per_night_per_person_amount));
+  const prices = data.map(d => parseFloat(d.per_night_amount));
   const labels = data.map(d => d.checked_at.slice(0, 10));
   const min = Math.min(...prices).toFixed(0);
   const max = Math.max(...prices).toFixed(0);
@@ -333,7 +329,7 @@ async function toggleHotelHistory(id, btn) {
       <div>lowest<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
       <div>highest<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">per night / person</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">per night</div>
     <div style="position:relative;height:150px;"><canvas id="hotel-chart-${id}"></canvas></div>`;
   const ctx = document.getElementById('hotel-chart-' + id).getContext('2d');
   hotelCharts[id] = new Chart(ctx, {
@@ -346,7 +342,7 @@ async function toggleHotelHistory(id, btn) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (c) => '$' + c.parsed.y.toFixed(0) + '/night/person' } } },
+        tooltip: { callbacks: { label: (c) => '$' + c.parsed.y.toFixed(2) + '/night' } } },
       scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
                 x: { ticks: { font: { size: 11 } } } }
     }

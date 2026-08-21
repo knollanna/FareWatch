@@ -335,7 +335,6 @@ def check_all_hotel_watches():
             check_in=hw["check_in"],
             check_out=hw["check_out"],
             guests=hw["guests"],
-            rooms=hw["rooms"],
             refundable_only=refundable_only,
         )
 
@@ -373,7 +372,6 @@ def check_all_hotel_watches():
             "hotel_watch_id": hw["id"],
             "total_amount": rate["total_amount"],
             "per_night_amount": rate["per_night_amount"],
-            "per_night_per_person_amount": rate["per_night_per_person_amount"],
             "currency": rate["currency"],
             "nights": rate["nights"],
             "rate_name": rate["rate_name"],
@@ -382,22 +380,23 @@ def check_all_hotel_watches():
             "refundable": rate["refundable"],
         }).execute()
 
-        target = float(hw["target_price_per_night_per_person"])
-        ppp = rate["per_night_per_person_amount"]
-        status = "TARGET MET ✓" if ppp <= target else "above target"
+        # Tracked unit is the nightly ROOM rate — hotels sell room-nights.
+        target = float(hw["target_price_per_night"])
+        nightly = rate["per_night_amount"]
+        status = "TARGET MET ✓" if nightly <= target else "above target"
         refund_label = ("refundable" if rate["refundable"] else
                         "non-refundable" if rate["refundable"] is False else "refundable n/a")
-        print(f"  Lowest: {rate['currency']} {ppp:.2f}/night/person "
+        print(f"  Lowest: {rate['currency']} {nightly:.2f}/night "
               f"(target {rate['currency']} {target:.2f}) — {status}")
         board = f" · {rate['board_name']}" if rate.get("board_name") else ""
         print(f"  {rate['rate_name']}{board} · {rate['nights']} night(s) · "
               f"total {rate['currency']} {rate['total_amount']:.2f} · {refund_label}")
 
-        # ── Alert: fire on a new per-night-per-person low at/below target ──────
+        # ── Alert: fire on a new per-night low at/below target ────────────────
         # Baseline from sent_alerts (successful sends only) → swallow-safe, and a
         # failed send is retried next run instead of being lost.
         alerted_low = get_hotel_alerted_low(hw["id"])
-        if ppp <= target and (alerted_low is None or ppp < alerted_low):
+        if nightly <= target and (alerted_low is None or nightly < alerted_low):
             print(f"  New low under target — sending hotel alert(s).")
             email_ok = slack_ok = False
             try:
@@ -414,9 +413,9 @@ def check_all_hotel_watches():
                 print(f"  💬 Hotel Slack failed: {e}")
             if email_ok or slack_ok:
                 supabase.table("sent_alerts").insert(
-                    {"hotel_watch_id": hw["id"], "price": ppp}
+                    {"hotel_watch_id": hw["id"], "price": nightly}
                 ).execute()
-        elif ppp <= target:
+        elif nightly <= target:
             print(f"  at/below target but not a new alerted low — skipping.")
         print()
 

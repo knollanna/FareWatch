@@ -58,15 +58,17 @@ def _num(v):
         return None
 
 
-def _build_occupancies(guests, rooms):
-    """Spread `guests` adults across `rooms` rooms, at least one adult per room.
+def _build_occupancies(guests):
+    """One room for `guests` adults — LiteAPI wants a list of {"adults": N, ...}.
 
-    LiteAPI wants `occupancies` as one object per room: {"adults": N, "children": []}.
+    Deliberately single-room. Multi-room is not supported: LiteAPI returns one
+    `retailRate.total` per occupancy ("that specific room's price alone") and
+    expects the caller to sum them by `occupancyNumber`, whereas we take the
+    cheapest single rate. Spreading guests across rooms here would silently
+    report one room's price as the whole stay. Guests still matter — a room for
+    two prices differently from a room for one.
     """
-    rooms = max(int(rooms or 1), 1)
-    guests = max(int(guests or 1), rooms)  # never fewer guests than rooms
-    base, extra = divmod(guests, rooms)
-    return [{"adults": base + (1 if i < extra else 0), "children": []} for i in range(rooms)]
+    return [{"adults": max(int(guests or 1), 1), "children": []}]
 
 
 def _retry_wait_seconds(response):
@@ -142,15 +144,18 @@ def _extract_rates(payload):
 
 # ── Public API ───────────────────────────────────────────────────────────────────
 
-def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
+def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1,
                           refundable_only=False, currency="USD",
                           guest_nationality="US"):
     """Cheapest current rate for one accommodation over [check_in, check_out).
 
     Returns (rate, error):
       * rate — dict ready for `hotel_price_history`, or None if no rate/failed:
-          {total_amount, per_night_amount, per_night_per_person_amount, currency,
-           nights, rate_name, rate_code, refundable, offer_id}
+          {total_amount, per_night_amount, currency, nights, rate_name,
+           rate_code, board_name, board_type, refundable, offer_id}
+        `per_night_amount` (total / nights) is the tracked figure — one room, so
+        it's the nightly room rate. Hotels sell room-nights; there is no
+        per-person unit here.
       * error — None on success or a genuine "no rooms"; a message string on
         API/validation failure. (Mirrors duffel.get_lowest_fare's error contract.)
 
@@ -169,14 +174,7 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
     if not LITEAPI_KEY:
         return None, "LITEAPI_KEY is not set"
 
-    occupancies = _build_occupancies(guests, rooms)
-    # The number of adults LiteAPI actually prices. _build_occupancies puts at
-    # least one adult in every room, so a watch with rooms > guests (e.g. 1 guest,
-    # 2 rooms) is quoted for MORE people than the watch asks for. Divide the
-    # per-person figure by what was priced, not by `guests` — otherwise
-    # per-night-per-person is inflated by the difference, and that figure is the
-    # alert threshold.
-    priced_guests = max(sum(o["adults"] for o in occupancies), 1)
+    occupancies = _build_occupancies(guests)
 
     body = {
         "hotelIds": [hotel_id],
@@ -238,8 +236,9 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
         total = best["total_amount"]
         rate = {
             "total_amount": round(total, 2),
+            # The tracked figure. One room, so this is the nightly room rate —
+            # the unit hotels actually quote and targets are set in.
             "per_night_amount": round(total / nights, 2),
-            "per_night_per_person_amount": round(total / nights / priced_guests, 2),
             "currency": best["currency"],
             "nights": nights,
             "rate_name": best["rate_name"],
