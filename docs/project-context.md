@@ -299,17 +299,78 @@ currently `REDACTED`.
   usually non-refundable, BEFORE filtering → 0 rates). We capture `boardName`/`boardType`
   (meal plan) per rate for comparability. Sandbox key returns fixed test hotels (Oslo
   `lp1d641` etc.). 429 backoff honours `Retry-After`.
-- **LiteAPI storage terms (confirmed 2026-07-18 via their support chatbot — not a
-  signed legal opinion):** persisting a per-hotel price-history time-series is fine
-  as *analytics/price-tracking*, BUT stored rates must **not** be shown as guaranteed
-  quotes (they're live shopping data). So: client cards show the current "lowest
-  observed" rate + a "live, can change until booked" caveat; alerts carry the same
-  caveat; the price-history **chart is admin-only** (`/hotel_history` is
-  `@login_required`, removed from the client page). Store only minimal fields (never
-  the full payload); don't persist `offerId` long-term. If booking is ever added:
-  re-shop + `POST /rates/prebook` before payment. `boardName`/`boardType` now captured.
-  `POST /hotels/min-rates` evaluated + **rejected** (too lean — no refundable filter,
-  no rate/board detail). Still deferred: storing `paymentTypes`, pinning board per watch.
+- **⚠️ LiteAPI storage terms — STILL UNRESOLVED; went live anyway (Anna's call,
+  2026-08-21).** The production `LITEAPI_KEY` was set and hotels enabled with the
+  retention question open. Nothing below has been answered by LiteAPI — the
+  account being approved is not the same as them agreeing to what we store.
+  **Revisit before this accumulates much history; the fallback below gets more
+  expensive the longer the series grows.** ⚠️ *Anna — correct this paragraph if
+  you did get a specific answer; it is written as "proceeded with it open"
+  because none was recorded here.*
+
+  **The written terms.** Read from <https://liteapi.travel/terms/> (Nuitee Connect
+  ToS) on **2026-08-21**. Quoted so nobody re-litigates this from memory:
+  - §3 prohibits "Using Nuitee Connect data for **competitive analysis,
+    benchmarking, or derivative works**".
+  - §3 also prohibits "Mapping Nuitee Connect data to third-party sources or
+    datasets" and "Redistributing or reselling Nuitee Connect inventory or data".
+  - §5 prohibits "To scrape, harvest, or bulk-download inventory" and "To build,
+    train, or enrich third-party datasets, machine learning models, or mapping
+    systems".
+  - The ToS is **silent on caching/retention** — there is no "you may cache rates
+    for N hours" carve-out to rely on.
+
+  Note the public marketing summary of the terms is milder than the ToS itself
+  ("exploit… beyond permitted delivery of travel services"). **The ToS is the
+  operative document**; don't clear this against the summary.
+
+  **The conflict.** `hotel_price_history` retains one row per watch per check and
+  charts it over time. That is a plausible reading of a *derivative work* built
+  from their rate data, and the chart is analytics on top of it. The exposure is
+  the **retention**, not the checking.
+
+  **What is NOT in tension** (so a future reader doesn't over-correct): the core
+  use — looking up rates for a specific client's stay and delivering travel
+  services — is squarely inside the granted license. Polling two named hotels every
+  2h with backoff is not "bulk-download inventory". Tracking one property for one
+  client is not competitive benchmarking. The Google Travel link in alerts builds a
+  search URL from a hotel name; that is not "mapping to third-party datasets",
+  though it's worth naming if we ask.
+
+  **Why the old note was wrong.** This was previously recorded as *confirmed
+  2026-07-18 via their support chatbot* — flagged even then as "not a signed legal
+  opinion". A chatbot's assurance does not vary a contract, and it contradicts the
+  written §3. Treat the 2026-07-18 answer as void.
+
+  **What resolves it:** written confirmation from a *human* at LiteAPI/Nuitée,
+  describing exactly what is stored — the `hotel_price_history` columns, no raw
+  payload, no `offerId`, admin-only chart, one series per client watch, never shown
+  as a guaranteed quote. Per `anna-tools/rules/data-sources.md`, written permission
+  is the legitimate path when a provider prohibits something we need.
+
+  **Fallback if they say no:** hotels still work without persistence — check the
+  rate, alert when under target, keep only the alert record instead of a time
+  series. That loses the history chart, and the "new low" dedup baseline needs
+  rethinking, since `sent_alerts.price` also stores a value derived from their data.
+
+  **Presentation safeguards already built** (keep these regardless): stored rates
+  are never shown as guaranteed quotes — client cards show "lowest observed" + a
+  "live, can change until booked" caveat, alerts carry the same caveat, and the
+  price-history **chart is admin-only** (`/hotel_history` is `@login_required`,
+  removed from the client page). Only minimal fields are stored (never the full
+  payload); `offerId` is never persisted. If booking is ever added: re-shop +
+  `POST /rates/prebook` before payment. `boardName`/`boardType` captured.
+  `POST /hotels/min-rates` evaluated + **rejected** (too lean — no refundable
+  filter, no rate/board detail). Still deferred: storing `paymentTypes`, pinning
+  board per watch.
+- **Hotel picker: `countryCode` is ISO-3166 alpha-2, and "UK" is not one** (GB is).
+  The two-letter box makes near-misses look correct, and LiteAPI answers an
+  unmatched code with **HTTP 200 and an empty list** — indistinguishable from "this
+  city has no hotels". `/hotels/search` now maps UK→GB (plus EN→GB, SF→FI, EL→GR)
+  and says so when a search comes back empty. Also: `/data/hotels` takes a
+  **`hotelName`** loose match — without it a big city returns an arbitrary slice
+  and the property you want probably isn't in it. `limit` defaults to 200 their
+  side (max 5000); ours was hardcoded to 25, which hid most of any real city.
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
   blanking all charts; currently `4.5.0`. Charts must build after layout
   (DOMContentLoaded) or render 0-size.
@@ -378,28 +439,46 @@ pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly
 usage page, route price-history context on the add-watch form. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
 alerts, `/hotels` admin UI, and client-facing cards. The price-history **chart is
 admin-only** — deliberately, per the LiteAPI storage terms in §7; the client page
-shows a "lowest observed" card with the live-rates caveat and no chart. **Not live
-yet:** the hotel migrations aren't pushed to prod and there's no production
-**`LITEAPI_KEY`** — see the go-live checklist below. Until then the prod picker/cron
-no-op with "LITEAPI_KEY is not set".
+shows a "lowest observed" card with the live-rates caveat and no chart.
+**Hotels went live in production on 2026-08-21:** all migrations applied, the
+production `LITEAPI_KEY` set on both Render services, and the `/hotels` picker
+confirmed returning real inventory. Went live with the **§7 storage question still
+open** — that was a deliberate call, not an oversight.
 
 **Pending / next:**
 - **Hotels go-live checklist** — do these in order when ready to run hotels live.
   Hotel migrations are applied locally + committed to the repo but **deliberately
   NOT pushed to prod** (the feature is dormant, so we don't touch prod prematurely):
-  1. `supabase login` (the CLI session expires) → **`supabase db push --linked
-     --include-all`** to apply ALL pending hotel migrations to prod. **Do this
-     first** — the checker inserts `board_name`/`board_type` etc., so prod would
-     error on the missing columns. **`--include-all` is required, not optional:**
-     `20260602000000_add_hotel_tables.sql` sorts *before* five migrations already
-     applied in prod (`20260602010000` … `20260609010000`), and a plain `db push`
-     refuses to insert migrations that predate the last row in the remote history
-     table. Confirm with `supabase db push --linked --dry-run` first (read-only) —
-     it lists exactly the three hotel migrations and nothing else.
-  2. Set the production **`LITEAPI_KEY`** on Render (web + cron). Needs LiteAPI
-     production access: business details + ToS + a card on file (free "Build" tier,
-     commission-on-bookings; ToS storage question **resolved** — see §7). Use the
-     **production** key, never the sandbox one (test-hotel pollution).
+  1. ✅ **DONE 2026-08-21.** All hotel migrations are applied in prod.
+     `20260602000000_add_hotel_tables` and `20260718000000_hotel_sent_alerts` had
+     already been pushed (2026-06-02 and 2026-07-18 — the "deliberately NOT pushed
+     to prod" note that used to live here was wrong). Only
+     `20260718010000_add_board_to_hotel_history` was outstanding, and a plain
+     `supabase db push --linked` applied it. **`--include-all` was NOT needed** —
+     an earlier note claiming otherwise reasoned from filename ordering instead of
+     the remote history, and has been retracted (`docs/hotel-go-live-fixes.md` §1).
+     **Always check `supabase migration list --linked` before assuming what prod
+     has.** `supabase login` first if the CLI session has expired; on macOS it
+     stores the token in the login keychain, so click **Always Allow** when
+     prompted (that dialog wants your Mac password, not a Supabase one).
+  2. ✅ **DONE 2026-08-21** — production **`LITEAPI_KEY`** (the **private** key;
+     the public one is for their whitelabel/Payment SDK, which we don't use) set
+     on Render as a per-service env var on **both** `farewatch` and
+     `farewatch-price-check`. Set per-service rather than via an Environment
+     Group: `render.yaml` declares it at service level with `sync: false`, and
+     **service-level vars override group values in Render**, so a group would have
+     been silently ignored unless the service rows were deleted first.
+     The key is read at *import* time (`hotel_prices.py`), so a running process
+     never picks up a change — only a redeploy does.
+
+     Onboarding answers given, for the record: **commercial model = Account Credit
+     Card** (we never book through LiteAPI — the integration calls only
+     `POST /hotels/rates` and `GET /data/hotels`, so no traveller ever transacts);
+     **closed user group = No, public channels only** (`/client/<token>` has no
+     login — the token is a capability, not authentication, and hotel rates reach
+     clients by email too).
+
+     ⚠️ Done with the §7 storage question still open — see §7.
   3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.
 - **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
   replaced it. Left here only as history.

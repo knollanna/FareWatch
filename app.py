@@ -554,6 +554,10 @@ def add_watch():
 
 # ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
 
+# Two-letter inputs people type that aren't ISO-3166 alpha-2. The picker's box
+# accepts any two letters, so these look right and fail silently as "no hotels".
+_ISO2_ALIASES = {"UK": "GB", "EN": "GB", "SF": "FI", "EL": "GR"}
+
 def _attach_hotel_extras(hotel_watches):
     """Attach the latest hotel_price_history row as `latest` on each hotel watch."""
     for hw in hotel_watches:
@@ -594,11 +598,29 @@ def hotels_search():
     """JSON hotel lookup for the add-watch picker: find_hotels(city, country)."""
     city = request.args.get("city", "").strip()
     country = request.args.get("country", "").strip().upper()
-    if not city or not country:
-        return jsonify({"error": "Enter a city and a 2-letter country code.", "hotels": []})
-    hotels, err = find_hotels(city, country, limit=25)
+    name = request.args.get("name", "").strip()
+
+    # LiteAPI requires countryCode; cityName and hotelName are both optional, so
+    # either one is enough to search on.
+    if not country:
+        return jsonify({"error": "Enter a 2-letter country code.", "hotels": []})
+    if not city and not name:
+        return jsonify({"error": "Enter a city, a hotel name, or both.", "hotels": []})
+
+    # ISO-3166 alpha-2 is what the API wants, and the two-letter box makes the
+    # common near-misses look correct. Map them rather than returning a silent
+    # empty list ("UK" is not a country code; GB is).
+    country = _ISO2_ALIASES.get(country, country)
+
+    hotels, err = find_hotels(city, country, hotel_name=name or None)
     if err:
         return jsonify({"error": err, "hotels": []})
+    if not hotels:
+        return jsonify({
+            "error": f"No hotels found for {city or name} ({country}). "
+                     "Check the country is an ISO-2 code, or try a hotel name.",
+            "hotels": [],
+        })
     return jsonify({"hotels": hotels})
 
 
