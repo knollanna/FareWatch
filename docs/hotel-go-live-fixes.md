@@ -24,7 +24,7 @@ Not just read; each was demonstrated.
 | 1 | Swallow-safe alerts (dedup baseline from `sent_alerts`, not `hotel_price_history`) | Code path traced; `sent_alerts` row written only if email **or** Slack returns truthy |
 | 2 | Tracks net `retailRate.total`, not `suggestedSellingPrice` | Fed a payload carrying both (600 vs 720) — parser picked **600** |
 | 3 | `refundable_only` → native `refundableRatesOnly`, never with `maxRatesPerHotel` | Inspected the outgoing request body: flag present, cap absent |
-| 4 | Compliance: admin-only history, minimal fields, `offerId` never persisted | `/hotel_history` returns 302→`/login` when logged out, 200 when authed; the history INSERT omits `rate_code`/`offer_id`; `client.html` has no chart |
+| 4 | Compliance: admin-only history, minimal fields, `offerId` never persisted | `/hotel_history` returns 302→`/login` when logged out, 200 when authed; the history INSERT omits `rate_code`/`offer_id`; `client.html` has no chart. **⚠️ See "Blocker" below — the safeguards work, but the right to retain the series at all is unresolved.** |
 | 5 | Shared `sent_alerts` CHECK still satisfied by flights | Against the live local DB: both-set and neither-set inserts **rejected**; flight-shaped and hotel-shaped rows **accepted** |
 | 6 | `board_name` captured for comparability | Present in the parser output and the history INSERT |
 | 7 | Test/prod isolation | Sandbox key local only; hotel migrations applied locally, not pushed |
@@ -37,25 +37,38 @@ only their own rows with both present in `sent_alerts`.
 
 ## Fixes applied
 
-### 1. Migration ordering — **go-live blocker**
+### 1. ~~Migration ordering — go-live blocker~~ — **RETRACTED 2026-08-21, this was wrong**
 `docs/project-context.md` §9, `docs/hotel-go-live-review.md`
 
-`20260602000000_add_hotel_tables.sql` sorts **before** five migrations already
-applied in prod (`20260602010000` … `20260609010000`). A plain `supabase db push`
-refuses to insert migrations that predate the last row in the remote history
-table, so checklist step 1 would have failed at the console.
+**The original claim (wrong):** that `20260602000000_add_hotel_tables.sql` sorts
+before five migrations already applied in prod, so a plain `supabase db push`
+would refuse it and `--include-all` was required.
 
-Both checklists now say:
+**What was actually true.** `supabase migration list --linked` on 2026-08-21
+showed **two of the three hotel migrations were already applied in prod**:
 
-```bash
-supabase db push --linked --dry-run    # read-only, confirm first
-supabase db push --linked --include-all
-```
+| Migration | Remote state on 2026-08-21 |
+|---|---|
+| `20260602000000_add_hotel_tables` | already applied (2026-06-02) |
+| `20260718000000_hotel_sent_alerts` | already applied (2026-07-18) |
+| `20260718010000_add_board_to_hotel_history` | pending — the only one |
 
-Confirmed against the installed CLI (v2.111.0): `--include-all` is documented as
-"include all migrations not found on remote history table" — exactly this case.
-Version order is still respected once forced, so the hotel tables land before
-`20260718000000` references them.
+There was never an ordering problem: `20260602000000` was applied *in sequence*
+back on 2026-06-02, so it sits in the correct position in the remote history and
+nothing sorts before the remote head. `supabase db push --linked` pushed the one
+pending migration cleanly. **`--include-all` was not needed and should not be
+used here.**
+
+**Root cause of the error:** prod's state was inferred from §9's claim that hotel
+migrations were "deliberately NOT pushed to prod" — which was itself stale —
+combined with reasoning from the *filenames*. The remote history table was never
+listed. **Check `supabase migration list --linked` before reasoning about what
+prod has;** filename ordering tells you nothing about what was applied when.
+
+**Silver lining worth keeping:** because `20260718000000` has been live since
+2026-07-18, the shared `sent_alerts` CHECK has been holding in **production** for
+a month of real flight alerts — stronger evidence for invariant #5 than the local
+test that was run for this review.
 
 ### 2. Hotel alerts corrupted the flight dashboard's "Recent alerts"
 `app.py:211` — `_get_recent_alerts`
@@ -185,6 +198,24 @@ the restriction **and why**, so it doesn't get "restored" as a missing feature.
 | Past-dated hotel watches check forever | `check_all_hotel_watches` | No date filter and no `is_archived` (deferred by design). A watch whose stay has passed keeps consuming calls and showing an error indefinitely. Related to the existing "auto-close past-date watches" pending item. |
 
 ---
+
+## Blocker opened 2026-08-21 — ToS storage question
+
+Reading the **full** Nuitée ToS (<https://liteapi.travel/terms/>) reopened the
+storage question this review had treated as settled. §3 prohibits "Using Nuitee
+Connect data for competitive analysis, benchmarking, or **derivative works**",
+and the ToS is silent on caching/retention. A retained `hotel_price_history`
+series plus a chart over it is a plausible derivative work.
+
+The prior clearance came from LiteAPI's **support chatbot** (2026-07-18), which
+does not vary a contract and contradicts the written §3. Treat it as void.
+
+**Do not set a production `LITEAPI_KEY` until a human at LiteAPI confirms in
+writing.** Full detail, quoted clauses, what is *not* in tension, and the
+no-persistence fallback design are in `docs/project-context.md` §7.
+
+Nothing above needs undoing — every fix in this document stands on its own, and
+hotels are already dormant in prod, so holding costs nothing.
 
 ## Notes for go-live day
 

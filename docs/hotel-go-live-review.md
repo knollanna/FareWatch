@@ -48,6 +48,9 @@ storage-terms gotchas), §8 (runbook), **§9 (go-live checklist)**.
    are live and can change until booked"; hotel **history is admin-only**
    (`/hotel_history` is `@login_required`, removed from client page); only minimal
    fields stored (never full payload); **`offerId` never persisted**.
+   ⚠️ **These safeguards are built and verified, but whether we may retain the
+   price-history series AT ALL is unresolved as of 2026-08-21** — the written
+   Nuitée ToS §3 bars "derivative works" from their data. See §7. Blocks go-live.
 5. **Shared `sent_alerts` CHECK** — verify flight alerts still satisfy
    exactly-one-of(watch_id, hotel_watch_id) (flights set `watch_id`, hotel_watch_id NULL).
 6. **`board_name` captured** for meal-plan comparability (the tracked "cheapest"
@@ -65,14 +68,14 @@ storage-terms gotchas), §8 (runbook), **§9 (go-live checklist)**.
 - Hotel watches use only `is_active` (no `is_paused`/`is_archived`).
 
 ## Go-live steps (from §9)
-1. `supabase login` → **`supabase db push --linked --include-all`** — apply ALL
-   pending hotel migrations to prod. **Do this FIRST** (the checker inserts
-   `board_name` etc.; prod would error on missing columns). `--include-all` is
-   required: `20260602000000_add_hotel_tables.sql` predates five migrations already
-   in prod, and a plain `db push` refuses out-of-order migrations. Dry-run first:
-   `supabase db push --linked --dry-run`.
-2. Set the **production** `LITEAPI_KEY` on Render (web + cron) — production key,
-   never the sandbox one (test-hotel pollution).
+1. ✅ **DONE 2026-08-21** — all hotel migrations are in prod. Two of the three were
+   already applied (June/July); a plain `supabase db push --linked` handled the
+   last one. `--include-all` was **not** needed; an earlier note here said it was,
+   reasoning from filename order rather than `supabase migration list --linked`.
+   See §7/§9 and `docs/hotel-go-live-fixes.md` §1.
+2. **🚧 BLOCKED on the ToS storage question (§7)** — settle it in writing with a
+   human at LiteAPI first. Then set the **production** `LITEAPI_KEY` on Render
+   (web + cron) — production key, never the sandbox one (test-hotel pollution).
 3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.
 
 ## Running locally for review/testing
