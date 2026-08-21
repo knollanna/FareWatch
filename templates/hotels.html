@@ -231,6 +231,7 @@ async function searchPlaces() {
       // The address is the whole point — it's how you tell four Heathrow
       // Hiltons apart.
       o.textContent = p.address ? `${p.name} — ${p.address}` : p.name;
+      o.dataset.name = p.name;   // used to auto-match the hotel below
       psel.appendChild(o);
     });
   } catch (e) {
@@ -251,9 +252,45 @@ async function pickPlace() {
       return;
     }
     fillHotelSelect(sel, data.hotels, '', '');
+
+    // Picking the place should be enough when the answer isn't ambiguous.
+    // placeId searches a ~1km radius, so neighbouring hotels come back too —
+    // auto-select only when there's one result, or one clear name match against
+    // the place you chose. Otherwise leave it for a deliberate pick.
+    const placeName = normName(psel.selectedOptions[0].dataset.name || '');
+    let chosen = '';
+    if (data.hotels.length === 1) {
+      chosen = data.hotels[0].id;
+    } else if (placeName) {
+      const scored = data.hotels.map(h => {
+        const n = normName(h.name);
+        let score = 0;
+        if (n === placeName) score = 3;
+        else if (n && (placeName.startsWith(n) || n.startsWith(placeName))) score = 2;
+        return { id: h.id, score };
+      // Exact or prefix only. Plain substring is too weak: searching a generic
+      // place like "Heathrow Airport" would otherwise auto-pick whichever
+      // neighbour happened to contain those words.
+      }).filter(x => x.score >= 2).sort((a, b) => b.score - a.score);
+      // Only when the winner is unambiguous.
+      if (scored.length === 1 || (scored.length > 1 && scored[0].score > scored[1].score)) {
+        chosen = scored[0].id;
+      }
+    }
+    if (chosen) {
+      sel.value = chosen;
+      pickHotel();               // fill the hidden accommodation_* inputs
+    } else {
+      sel.focus();               // ambiguous — make the next step obvious
+    }
   } catch (e) {
     sel.innerHTML = '<option value="">lookup failed — try again</option>';
   }
+}
+
+// "Hilton Garden Inn London Heathrow, Terminals 2 & 3" -> comparable text
+function normName(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 async function searchHotels() {
@@ -290,7 +327,7 @@ function pickHotel() {
 
 function validateHotel() {
   if (!document.getElementById('accommodation_id').value) {
-    alert('Search a city and pick a hotel first.');
+    alert('Pick a hotel from the “hotel” list first.');
     return false;
   }
   const ci = document.querySelector('input[name="check_in"]').value;
