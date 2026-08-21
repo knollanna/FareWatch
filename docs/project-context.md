@@ -363,6 +363,15 @@ currently `REDACTED`.
   `POST /hotels/min-rates` evaluated + **rejected** (too lean — no refundable
   filter, no rate/board detail). Still deferred: storing `paymentTypes`, pinning
   board per watch.
+- **Past-dated hotel watches are skipped, not checked (2026-08-21).** A stay whose
+  `check_out` is before today has nothing left to price; left running it called
+  LiteAPI 12x/day forever, got "no rooms" every time, and left a permanent error on
+  the card. `check_all_hotel_watches` now skips them and the card shows a **past**
+  badge plus "Stay has ended" instead of the stale error. The comparison is
+  `check_out < today`, so a stay ending *today* is still checked — deliberate slack,
+  since the cron runs UTC while hotel dates are local. Hotel watches still have no
+  `is_archived`, so this is the whole guard; the flights-side "auto-close past-date
+  watches" item is still open and the two would sensibly be built together.
 - **Hotels are tracked PER NIGHT, not per person (2026-08-21).** Hotels sell
   room-nights — a queen room costs the same whether one or two people sleep in it.
   Per-person was a *flights* idiom (fares really are per passenger) carried across
@@ -382,9 +391,12 @@ currently `REDACTED`.
   (group by `occupancyNumber`, cheapest per room, sum) — not just re-adding the field.
 - **`retailRate.total` includes taxes flagged `included: true` only.** Their
   `taxesAndFees` array carries a per-line `included` boolean, and anything false is
-  **charged separately at the property** (city tax, resort fee). We don't capture
-  that array, so a client-facing figure can understate what they actually pay.
-  Worth fixing before hotel rates go in front of clients at scale.
+  **charged separately at the property** (city tax, resort fee). Captured since
+  2026-08-21 as a single `hotel_price_history.excluded_fees_amount` (whole-stay
+  sum, 0 = none, NULL = checked before we captured it) — deliberately one number
+  rather than the breakdown, to keep the retained shape minimal while the storage
+  question above is open. Cards and all three alert bodies append "+ X in
+  taxes/fees payable at the property" when it's non-zero.
 - **Hotel picker: `countryCode` is ISO-3166 alpha-2, and "UK" is not one** (GB is).
   The two-letter box makes near-misses look correct, and LiteAPI answers an
   unmatched code with **HTTP 200 and an empty list** — indistinguishable from "this
