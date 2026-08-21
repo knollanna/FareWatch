@@ -32,7 +32,7 @@ from flask import (Flask, Response, flash, jsonify, redirect, render_template,
 from supabase import Client, create_client
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from hotel_prices import find_hotels
+from hotel_prices import find_hotels, find_places
 from route_stats import route_price_stats
 
 load_dotenv()
@@ -599,29 +599,58 @@ def hotels_search():
     city = request.args.get("city", "").strip()
     country = request.args.get("country", "").strip().upper()
     name = request.args.get("name", "").strip()
-
-    # LiteAPI requires countryCode; cityName and hotelName are both optional, so
-    # either one is enough to search on.
-    if not country:
-        return jsonify({"error": "Enter a 2-letter country code.", "hotels": []})
-    if not city and not name:
-        return jsonify({"error": "Enter a city, a hotel name, or both.", "hotels": []})
+    place_id = request.args.get("place_id", "").strip()
 
     # ISO-3166 alpha-2 is what the API wants, and the two-letter box makes the
     # common near-misses look correct. Map them rather than returning a silent
     # empty list ("UK" is not a country code; GB is).
     country = _ISO2_ALIASES.get(country, country)
 
-    hotels, err = find_hotels(city, country, hotel_name=name or None)
+    # A place_id already pins the location, so nothing else is required.
+    if not place_id:
+        if not country:
+            return jsonify({"error": "Enter a 2-letter country code.", "hotels": []})
+        if not city and not name:
+            return jsonify({"error": "Enter a city, a hotel name, or both.", "hotels": []})
+
+    # cityName AND hotelName must BOTH match. A hotel's registered city is often
+    # not the one you'd type (Heathrow files under Hounslow/Hayes), so sending
+    # both silently returns nothing. Name alone is the more reliable filter.
+    if name and city:
+        city = ""
+
+    hotels, err = find_hotels(city_name=city or None, country_code=country or None,
+                              hotel_name=name or None, place_id=place_id or None)
     if err:
         return jsonify({"error": err, "hotels": []})
     if not hotels:
         return jsonify({
-            "error": f"No hotels found for {city or name} ({country}). "
-                     "Check the country is an ISO-2 code, or try a hotel name.",
+            "error": f"No hotels found for {name or city or 'that place'}"
+                     f"{f' ({country})' if country else ''}. "
+                     "Try the name on its own, or search by place above.",
             "hotels": [],
         })
     return jsonify({"hotels": hotels})
+
+
+@app.route("/hotels/places")
+@login_required
+def hotels_places():
+    """Free-text place lookup for the picker — 'Hilton Garden Inn Heathrow'.
+
+    Backed by /data/places, which unlike /data/hotels doesn't require the city to
+    match a hotel's registered one. The chosen place_id is then resolved to real
+    LiteAPI hotels by /hotels/search.
+    """
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "Type a hotel name or place to search for.", "places": []})
+    places, err = find_places(q)
+    if err:
+        return jsonify({"error": err, "places": []})
+    if not places:
+        return jsonify({"error": f"Nothing found for “{q}”.", "places": []})
+    return jsonify({"places": places})
 
 
 @app.route("/add_hotel", methods=["POST"])

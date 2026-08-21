@@ -254,7 +254,45 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
     return None, "LiteAPI rate limit exceeded after retries"
 
 
-def find_hotels(city_name, country_code, hotel_name=None, limit=200):
+def find_places(text_query, types="hotel", limit=10):
+    """Free-text location/hotel lookup via LiteAPI's /data/places.
+
+    Returns (places, error) where each place is
+    {place_id, name, address, types}.
+
+    This exists because `/data/hotels` filters on an exact `cityName`, and a
+    hotel's registered city often isn't the one you'd type: the Heathrow hotels
+    file under Hounslow/Hayes/West Drayton, so "Hilton Garden Inn" + London
+    matches nothing. /data/places is backed by Google Places, so it forgives word
+    order and partial names, and `formattedAddress` is what lets you tell four
+    Heathrow Hiltons apart. Feed the resulting place_id back into find_hotels().
+    """
+    if not LITEAPI_KEY:
+        return None, "LITEAPI_KEY is not set"
+    if not (text_query or "").strip():
+        return None, "Enter something to search for"
+    params = {"textQuery": text_query, "language": "en"}
+    if types:
+        params["type"] = types
+    try:
+        resp = requests.get(f"{LITEAPI_BASE}/data/places", headers=_headers(),
+                            params=params, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return None, f"Network error reaching LiteAPI: {e}"
+    if resp.status_code != 200:
+        return None, f"LiteAPI error: HTTP {resp.status_code}"
+    data = (resp.json() or {}).get("data") or []
+    places = [{
+        "place_id": p.get("placeId") or p.get("place_id"),
+        "name": p.get("displayName") or p.get("name"),
+        "address": p.get("formattedAddress") or p.get("address"),
+        "types": p.get("types") or [],
+    } for p in data]
+    return [p for p in places if p["place_id"]][:limit], None
+
+
+def find_hotels(city_name=None, country_code=None, hotel_name=None,
+                place_id=None, limit=200):
     """Look up LiteAPI hotels by ISO-2 country plus a city and/or a hotel name,
     for picking a watch's accommodation_id/name. Returns (hotels, error) where
     each hotel is {id, name, city, country}. Content endpoint; not charged per call.
@@ -265,12 +303,24 @@ def find_hotels(city_name, country_code, hotel_name=None, limit=200):
     it. `countryCode` is the only parameter LiteAPI requires; city is optional,
     so a name + country search works on its own.
 
+    `place_id` comes from find_places() and asks LiteAPI for hotels within ~1km
+    of that place — the reliable way to reach a property whose registered city
+    isn't the one you'd type (Heathrow, airport hotels, resorts outside town).
+
     limit defaults to 200 to match LiteAPI's own default (their max is 5000).
     The previous 25 was an arbitrary cap that hid most of a city's hotels.
+
+    NOTE: `cityName` and `hotelName` are ANDed. Passing both when the hotel's
+    registered city differs from the one you typed returns nothing — which reads
+    identically to "this hotel doesn't exist". Prefer place_id, or name alone.
     """
     if not LITEAPI_KEY:
         return None, "LITEAPI_KEY is not set"
-    params = {"countryCode": country_code, "limit": limit}
+    params = {"limit": limit}
+    if country_code:
+        params["countryCode"] = country_code
+    if place_id:
+        params["placeId"] = place_id
     if city_name:
         params["cityName"] = city_name
     if hotel_name:
