@@ -315,6 +315,8 @@ def check_all_hotel_watches():
 
     print(f"Checking {len(hotels)} active hotel watch(es)...\n")
     errors = []
+    skipped_past = 0
+    today = datetime.date.today().isoformat()   # dates are stored as ISO strings
 
     for i, hw in enumerate(hotels):
         # Gentle spacing between LiteAPI calls to stay well under their fair-use
@@ -327,6 +329,16 @@ def check_all_hotel_watches():
         name = hw["accommodation_name"]
         loc = hw.get("accommodation_city") or hw.get("accommodation_country") or ""
         refundable_only = bool(hw.get("refundable_only"))
+
+        # A stay that has already ended has nothing left to price. Left running,
+        # it would call LiteAPI 12x a day forever, get "no rooms" every time, and
+        # leave a permanent error on the card. Skip it and say so — there is no
+        # is_archived on hotel watches yet, so this is the whole guard.
+        if hw["check_out"] < today:
+            print(f"Skipping {name} — stay ended {hw['check_out']}.")
+            skipped_past += 1
+            print()
+            continue
         print(f"Checking {name}{f' ({loc})' if loc else ''} "
               f"{hw['check_in']} → {hw['check_out']}, {hw['guests']} guest(s)...")
 
@@ -378,6 +390,8 @@ def check_all_hotel_watches():
             "board_name": rate.get("board_name"),
             "board_type": rate.get("board_type"),
             "refundable": rate["refundable"],
+            # Charged at the property, on top of total_amount. 0.0 = none.
+            "excluded_fees_amount": rate.get("excluded_fees_amount"),
         }).execute()
 
         # Tracked unit is the nightly ROOM rate — hotels sell room-nights.
@@ -388,9 +402,11 @@ def check_all_hotel_watches():
                         "non-refundable" if rate["refundable"] is False else "refundable n/a")
         print(f"  Lowest: {rate['currency']} {nightly:.2f}/night "
               f"(target {rate['currency']} {target:.2f}) — {status}")
+        fees = rate.get("excluded_fees_amount") or 0
+        fee_note = (f" + {rate['currency']} {fees:.2f} fees at property" if fees else "")
         board = f" · {rate['board_name']}" if rate.get("board_name") else ""
         print(f"  {rate['rate_name']}{board} · {rate['nights']} night(s) · "
-              f"total {rate['currency']} {rate['total_amount']:.2f} · {refund_label}")
+              f"total {rate['currency']} {rate['total_amount']:.2f}{fee_note} · {refund_label}")
 
         # ── Alert: fire on a new per-night low at/below target ────────────────
         # Baseline from sent_alerts (successful sends only) → swallow-safe, and a
@@ -419,7 +435,8 @@ def check_all_hotel_watches():
             print(f"  at/below target but not a new alerted low — skipping.")
         print()
 
-    print("Hotel check done.")
+    print("Hotel check done."
+          + (f" ({skipped_past} past-dated watch(es) skipped)" if skipped_past else ""))
     if errors:
         print(f"\n⚠️  {len(errors)} hotel watch(es) had errors:")
         for e in errors:

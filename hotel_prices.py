@@ -102,6 +102,35 @@ def _rate_amount(rate):
     return None, None
 
 
+def _excluded_fees(rate):
+    """Total of taxes/fees NOT already in retailRate.total, or 0.0.
+
+    `retailRate.total` is "what the end user will pay" only for the taxes flagged
+    `included: true`. Each entry in `retailRate.taxesAndFees` carries its own
+    boolean, and anything false — a resort fee, a facility fee, a city tax — is
+    collected by the property on arrival. Without this the card understates what
+    the stay actually costs, which matters because a client acts on that number.
+
+      "taxesAndFees": [{"included": true,  "description": "…", "amount": 1.62, …},
+                       {"included": false, "description": "Facility Fee", "amount": 43.61, …}]
+
+    Deliberately reduced to ONE number rather than storing the breakdown: the
+    LiteAPI storage question (docs §7) is still open, so keep the retained shape
+    minimal. The figure is for the whole stay, matching total_amount.
+    """
+    fees = (rate.get("retailRate") or {}).get("taxesAndFees")
+    if not isinstance(fees, list):
+        return 0.0
+    total = 0.0
+    for f in fees:
+        if not isinstance(f, dict) or f.get("included") is not False:
+            continue  # included, or unknown — don't invent a charge
+        amt = _num(f.get("amount"))
+        if amt:
+            total += amt
+    return round(total, 2)
+
+
 def _rate_refundable(rate):
     """True/False if the rate's cancellation policy makes it clear; else None."""
     cp = rate.get("cancellationPolicies") or {}
@@ -137,6 +166,7 @@ def _extract_rates(payload):
                     "board_name": r.get("boardName"),
                     "board_type": r.get("boardType"),
                     "refundable": _rate_refundable(r),
+                    "excluded_fees": _excluded_fees(r),
                     "offer_id": r.get("offerId") or offer_id,
                 })
     return rates
@@ -246,6 +276,8 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1,
             "board_name": best["board_name"],
             "board_type": best["board_type"],
             "refundable": best["refundable"],
+            # Charged at the property, on top of total_amount (0.0 if none).
+            "excluded_fees_amount": best["excluded_fees"],
             "offer_id": best["offer_id"],
         }
         return rate, None

@@ -418,6 +418,19 @@ def _google_hotel_url(name, city):
     return f"https://www.google.com/travel/search?q={urllib.parse.quote(q)}"
 
 
+def _fees_note(rate, currency):
+    """' + USD 43.61 in taxes/fees payable at the property' — or '' if none.
+
+    retailRate.total only covers taxes flagged included:true, so an excluded
+    resort/facility fee is real money the client pays on arrival. Saying nothing
+    would quote them low.
+    """
+    fees = rate.get("excluded_fees_amount") or 0
+    if not fees:
+        return ""
+    return f" + {currency} {fees:,.2f} in taxes/fees payable at the property"
+
+
 def _refund_label(refundable):
     return "Refundable" if refundable else "Non-refundable" if refundable is False else ""
 
@@ -483,7 +496,8 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
   <p>Good news — a better rate just turned up for <strong>{name}</strong>{f' in {city}' if city else ''}:</p>
   <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
     <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {nightly:,.0f}/night{note}</div>
-    <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'}{board_html} · total {currency} {rate['total_amount']:,.0f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
+    <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'}{board_html} · total {currency} {rate['total_amount']:,.2f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
+    {f'<div style="font-size:12px;color:#a06010;margin-top:3px;">{_fees_note(rate, currency).lstrip(" +").capitalize()}</div>' if _fees_note(rate, currency) else ''}
   </div>
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Stay</td><td style="padding:4px 0;text-align:right;">{hw['check_in']} – {hw['check_out']} ({guests} guest{'s' if guests != 1 else ''})</td></tr>
@@ -514,7 +528,8 @@ def _build_hotel_alert_text(hw, rate, previous_low, currency):
         f"Hi {hw.get('client_name') or 'there'},", "",
         f"Good news — a better rate just turned up for {name}{f' in {city}' if city else ''}:", "",
         f"{currency} {nightly:,.0f}/night{note}",
-        f"  {rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.0f} for {nights} night(s)"
+        f"  {rate.get('rate_name') or 'Room'} · total {currency} {rate['total_amount']:,.2f} for {nights} night(s)"
+        + _fees_note(rate, currency)
         + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         "",
@@ -579,7 +594,8 @@ def send_hotel_slack_alert(hotel_watch, rate, previous_low=None):
         f"🏨 *New hotel low: {name}*",
         f"*Client:* {hotel_watch.get('client_name') or '—'} · {city}",
         f"*Lowest observed:* {currency} {nightly:,.0f}/night{note}",
-        f"*{rate.get('rate_name') or 'Room'}:* total {currency} {rate['total_amount']:,.0f} for {rate['nights']} night(s)"
+        f"*{rate.get('rate_name') or 'Room'}:* total {currency} {rate['total_amount']:,.2f} for {rate['nights']} night(s)"
+        + _fees_note(rate, currency)
         + (f" · {rate.get('board_name')}" if rate.get('board_name') else "")
         + (f" · {refund}" if refund else ""),
         f"*Stay:* {dates} · {hotel_watch['guests']} guest(s)",

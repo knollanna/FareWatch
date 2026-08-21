@@ -2,11 +2,13 @@
 {% block content %}
 
 {# ─────────────── Hotel watch card macro ─────────────── #}
-{% macro hotel_card(hw, paused=False) %}
+{% macro hotel_card(hw, paused=False, today=None) %}
+  {% set is_past = today and hw.check_out < today %}
   {% set lp = hw.latest %}
   {% set hit = lp and lp.per_night_amount <= hw.target_price_per_night %}
   <div class="watch-card {{ 'target-met' if hit }}">
     <div class="card-badges">
+      {% if is_past %}<span class="badge badge-past">past</span>{% endif %}
       {% if paused %}<span class="badge badge-paused">paused</span>{% endif %}
       {% if hw.client_name %}<span class="badge badge-client">{{ hw.client_name }}</span>{% endif %}
     </div>
@@ -25,6 +27,11 @@
           {% if lp.rate_name %}· {{ lp.rate_name }}{% endif %}
           {% if lp.board_name %}· {{ lp.board_name }}{% endif %}
           {% if lp.refundable is not none %}· {{ 'refundable' if lp.refundable else 'non-refundable' }}{% endif %}</span>
+        {% if lp.excluded_fees_amount %}
+          <div style="font-size:12px;color:#a06010;margin-top:3px;">
+            + ${{ "%.2f"|format(lp.excluded_fees_amount) }} taxes/fees payable at the property
+          </div>
+        {% endif %}
       </div>
       <div class="card-meta">
         <span>target ${{ "%.2f"|format(hw.target_price_per_night) }}/night</span>
@@ -34,7 +41,9 @@
       <div class="card-price muted">No price yet — after the next check.</div>
     {% endif %}
 
-    {% if hw.last_error %}<div class="card-error">⚠ {{ hw.last_error }}</div>{% endif %}
+    {% if is_past %}
+      <div class="card-meta"><span>Stay has ended — no longer being checked.</span></div>
+    {% elif hw.last_error %}<div class="card-error">⚠ {{ hw.last_error }}</div>{% endif %}
 
     {% if lp %}
     <button class="btn-sm accent" style="width:fit-content;" onclick="toggleHotelHistory('{{ hw.id }}', this)">📈 history</button>
@@ -171,7 +180,7 @@
 {# ─────────────── Active ─────────────── #}
 {% if active %}
   <div class="cards-grid">
-    {% for hw in active %}{{ hotel_card(hw) }}{% endfor %}
+    {% for hw in active %}{{ hotel_card(hw, today=today) }}{% endfor %}
   </div>
 {% else %}
   <p class="muted" style="margin-top:16px;">No active hotel watches yet. Click “add hotel watch” to start.</p>
@@ -181,7 +190,7 @@
 {% if paused %}
   <h3 style="margin-top:28px;">Paused</h3>
   <div class="cards-grid">
-    {% for hw in paused %}{{ hotel_card(hw, paused=True) }}{% endfor %}
+    {% for hw in paused %}{{ hotel_card(hw, paused=True, today=today) }}{% endfor %}
   </div>
 {% endif %}
 
