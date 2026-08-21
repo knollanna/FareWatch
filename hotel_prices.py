@@ -254,14 +254,27 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1, rooms=1,
     return None, "LiteAPI rate limit exceeded after retries"
 
 
-def find_hotels(city_name, country_code, limit=25):
-    """Look up LiteAPI hotels by city + ISO-2 country, for picking a watch's
-    accommodation_id/name. Returns (hotels, error) where each hotel is
-    {id, name, city, country}. Content endpoint; not charged per call.
+def find_hotels(city_name, country_code, hotel_name=None, limit=200):
+    """Look up LiteAPI hotels by ISO-2 country plus a city and/or a hotel name,
+    for picking a watch's accommodation_id/name. Returns (hotels, error) where
+    each hotel is {id, name, city, country}. Content endpoint; not charged per call.
+
+    `hotel_name` maps to LiteAPI's `hotelName` — a loose, case-insensitive match
+    ("hilton" finds every Hilton). Without it, a big city returns an arbitrary
+    slice of its inventory and the property you actually want probably isn't in
+    it. `countryCode` is the only parameter LiteAPI requires; city is optional,
+    so a name + country search works on its own.
+
+    limit defaults to 200 to match LiteAPI's own default (their max is 5000).
+    The previous 25 was an arbitrary cap that hid most of a city's hotels.
     """
     if not LITEAPI_KEY:
         return None, "LITEAPI_KEY is not set"
-    params = {"countryCode": country_code, "cityName": city_name, "limit": limit}
+    params = {"countryCode": country_code, "limit": limit}
+    if city_name:
+        params["cityName"] = city_name
+    if hotel_name:
+        params["hotelName"] = hotel_name
     try:
         resp = requests.get(f"{LITEAPI_BASE}/data/hotels", headers=_headers(),
                             params=params, timeout=30)

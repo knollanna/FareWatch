@@ -79,8 +79,12 @@
         <input type="text" id="city" placeholder="Oslo" autocomplete="off" style="text-transform:none">
       </div>
       <div class="form-field">
-        <label>country (2-letter)</label>
+        <label>country (ISO-2, e.g. GB not UK)</label>
         <input type="text" id="country" placeholder="NO" maxlength="2" autocomplete="off" style="text-transform:uppercase">
+      </div>
+      <div class="form-field">
+        <label>hotel name (optional)</label>
+        <input type="text" id="hotel_name" placeholder="hilton" autocomplete="off" style="text-transform:none">
       </div>
       <div class="form-field" style="align-self:end;">
         <button type="button" class="btn-sm accent" onclick="searchHotels()">search hotels</button>
@@ -166,11 +170,14 @@
 async function searchHotels() {
   const city = document.getElementById('city').value.trim();
   const country = document.getElementById('country').value.trim();
+  const name = document.getElementById('hotel_name').value.trim();
   const sel = document.getElementById('hotel_select');
-  if (!city || !country) { alert('Enter a city and a 2-letter country code.'); return; }
+  if (!country) { alert('Enter a 2-letter country code (ISO-2 — GB, not UK).'); return; }
+  if (!city && !name) { alert('Enter a city, a hotel name, or both.'); return; }
   sel.innerHTML = '<option value="">searching…</option>';
   try {
-    const res = await fetch(`/hotels/search?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}`);
+    const res = await fetch(`/hotels/search?city=${encodeURIComponent(city)}`
+      + `&country=${encodeURIComponent(country)}&name=${encodeURIComponent(name)}`);
     const data = await res.json();
     sel.innerHTML = '';
     if (data.error || !data.hotels.length) {
