@@ -24,7 +24,7 @@ import datetime
 from dotenv import load_dotenv
 from supabase import create_client
 from duffel import get_lowest_fare
-from hotel_prices import get_lowest_hotel_rate
+from hotel_prices import get_hotel_rate_pair
 from alerts import (
     send_alert, send_error_alert, send_slack_alert,
     send_hotel_alert, send_hotel_slack_alert, send_hotel_error_alert,
@@ -265,6 +265,30 @@ def check_all_watches():
 
 
 # ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
+
+# An alert has to be worth an email. Hotel rates wobble by pennies between checks
+# — and the "cheapest" rate can flip between room types — so "any new low" fired
+# on a 7-cent drop (2026-08-21: "USD 401/night down from USD 401", twice in one
+# evening). A drop must now beat the last alerted low by BOTH of these to count.
+#
+# Tune here. The percentage is what scales sensibly across price points; the
+# absolute floor stops trivial amounts. NOTE the floor binds hardest on cheap
+# rooms — at $80/night it demands ~19% — so lower it if budget properties ever
+# get watched.
+MIN_DROP_PCT = 0.05      # 5% off the previous alerted low
+MIN_DROP_ABS = 15.00     # ...and at least this many currency units per night
+
+
+def _is_meaningful_drop(new_low, previous_low):
+    """True if `new_low` beats `previous_low` by enough to be worth an alert.
+
+    No previous low means nothing has been alerted for this watch yet, so the
+    first time it comes in under target always fires.
+    """
+    if previous_low is None:
+        return True
+    required = max(previous_low * MIN_DROP_PCT, MIN_DROP_ABS)
+    return (previous_low - new_low) >= required
 # Phase 1: check active hotel watches, store each check in hotel_price_history.
 # Alerts + hotel error emails come in Phase 2 (this only stores + logs).
 
@@ -342,13 +366,14 @@ def check_all_hotel_watches():
         print(f"Checking {name}{f' ({loc})' if loc else ''} "
               f"{hw['check_in']} → {hw['check_out']}, {hw['guests']} guest(s)...")
 
-        rate, err = get_lowest_hotel_rate(
+        pair, err = get_hotel_rate_pair(
             hotel_id=hw["accommodation_id"],
             check_in=hw["check_in"],
             check_out=hw["check_out"],
             guests=hw["guests"],
-            refundable_only=refundable_only,
         )
+        rate = (pair or {}).get("cheapest")          # cheapest overall
+        refundable = (pair or {}).get("refundable")  # cheapest genuinely refundable
 
         if rate is None:
             if err:
@@ -356,8 +381,7 @@ def check_all_hotel_watches():
             else:
                 # Genuine "no rooms". Distinguish no-refundable from no-availability
                 # so the UI isn't misleading, and bump the not-found counter.
-                what = "refundable rooms" if refundable_only else "rooms"
-                msg = f"No {what} for {name} ({hw['check_in']} → {hw['check_out']})"
+                msg = f"No rooms for {name} ({hw['check_in']} → {hw['check_out']})"
                 cnt = (hw.get("consecutive_room_not_found") or 0) + 1
                 supabase.table("hotel_watches").update(
                     {"consecutive_room_not_found": cnt}
@@ -389,50 +413,77 @@ def check_all_hotel_watches():
             "rate_name": rate["rate_name"],
             "board_name": rate.get("board_name"),
             "board_type": rate.get("board_type"),
+            # NOTE: describes the CHEAPEST rate, not the refundable_* set below.
             "refundable": rate["refundable"],
             # Charged at the property, on top of total_amount. 0.0 = none.
             "excluded_fees_amount": rate.get("excluded_fees_amount"),
+            # Cheapest genuinely-refundable rate. All NULL when the stay has none
+            # — which the UI must show as "none found", never as zero.
+            "refundable_total_amount": (refundable or {}).get("total_amount"),
+            "refundable_per_night_amount": (refundable or {}).get("per_night_amount"),
+            "refundable_excluded_fees_amount": (refundable or {}).get("excluded_fees_amount"),
+            "refundable_rate_name": (refundable or {}).get("rate_name"),
+            "refundable_board_name": (refundable or {}).get("board_name"),
+            "refundable_board_type": (refundable or {}).get("board_type"),
         }).execute()
 
         # Tracked unit is the nightly ROOM rate — hotels sell room-nights.
         target = float(hw["target_price_per_night"])
-        nightly = rate["per_night_amount"]
-        status = "TARGET MET ✓" if nightly <= target else "above target"
-        refund_label = ("refundable" if rate["refundable"] else
-                        "non-refundable" if rate["refundable"] is False else "refundable n/a")
-        print(f"  Lowest: {rate['currency']} {nightly:.2f}/night "
-              f"(target {rate['currency']} {target:.2f}) — {status}")
-        fees = rate.get("excluded_fees_amount") or 0
-        fee_note = (f" + {rate['currency']} {fees:.2f} fees at property" if fees else "")
-        board = f" · {rate['board_name']}" if rate.get("board_name") else ""
-        print(f"  {rate['rate_name']}{board} · {rate['nights']} night(s) · "
-              f"total {rate['currency']} {rate['total_amount']:.2f}{fee_note} · {refund_label}")
+        cur = rate["currency"]
 
-        # ── Alert: fire on a new per-night low at/below target ────────────────
+        def _line(label, r):
+            fees = r.get("excluded_fees_amount") or 0
+            fee_note = f" + {cur} {fees:.2f} fees at property" if fees else ""
+            board = f" · {r['board_name']}" if r.get("board_name") else ""
+            print(f"  {label}: {cur} {r['per_night_amount']:.2f}/night · "
+                  f"{r['rate_name']}{board} · total {cur} {r['total_amount']:.2f}{fee_note}")
+
+        _line("cheapest  ", rate)
+        if refundable is None:
+            print(f"  refundable: none available for these dates")
+        elif refundable is rate:
+            print(f"  refundable: same rate — the cheapest is already refundable")
+        else:
+            _line("refundable", refundable)
+
+        # ── Alert: REFUNDABLE price only ─────────────────────────────────────
+        # Alerting on the cheapest rate meant a non-refundable room could
+        # "beat" a refundable one by pennies and be reported as good news — a
+        # worse product at the same price. A client is generally booked on a
+        # refundable rate, so that is the only figure worth waking up for; the
+        # cheapest is stored and displayed as context and never alerts.
         # Baseline from sent_alerts (successful sends only) → swallow-safe, and a
         # failed send is retried next run instead of being lost.
         alerted_low = get_hotel_alerted_low(hw["id"])
-        if nightly <= target and (alerted_low is None or nightly < alerted_low):
-            print(f"  New low under target — sending hotel alert(s).")
+        alert_rate = refundable
+        alert_nightly = refundable["per_night_amount"] if refundable else None
+        if alert_nightly is None:
+            print(f"  no refundable rate — nothing to alert on.")
+        elif alert_nightly <= target and _is_meaningful_drop(alert_nightly, alerted_low):
+            print(f"  New refundable low under target — sending hotel alert(s).")
             email_ok = slack_ok = False
             try:
-                email_ok = send_hotel_alert(hw, rate, previous_low=alerted_low)
+                email_ok = send_hotel_alert(hw, alert_rate, previous_low=alerted_low)
                 if email_ok:
                     print(f"  ✉️  Hotel email sent")
             except Exception as e:
                 print(f"  ✉️  Hotel email failed: {e}")
             try:
-                slack_ok = send_hotel_slack_alert(hw, rate, previous_low=alerted_low)
+                slack_ok = send_hotel_slack_alert(hw, alert_rate, previous_low=alerted_low)
                 if slack_ok:
                     print(f"  💬 Hotel Slack sent")
             except Exception as e:
                 print(f"  💬 Hotel Slack failed: {e}")
             if email_ok or slack_ok:
                 supabase.table("sent_alerts").insert(
-                    {"hotel_watch_id": hw["id"], "price": nightly}
+                    {"hotel_watch_id": hw["id"], "price": alert_nightly}
                 ).execute()
-        elif nightly <= target:
-            print(f"  at/below target but not a new alerted low — skipping.")
+        elif alert_nightly > target:
+            print(f"  refundable {alert_nightly:.2f} is above the {target:.2f} target — no alert.")
+        elif alerted_low is not None:
+            need = max(alerted_low * MIN_DROP_PCT, MIN_DROP_ABS)
+            print(f"  at/below target but only {alerted_low - alert_nightly:+.2f} vs the last "
+                  f"alerted {alerted_low:.2f} (need {need:.2f}) — skipping.")
         print()
 
     print("Hotel check done."

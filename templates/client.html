@@ -250,9 +250,11 @@
   <div class="client-cards">
     {% for hw in hotel_watches %}
     {% set lp = hw.latest %}
-    {% set hit_target = lp and lp.per_night_amount <= hw.target_price_per_night %}
+    {% set ref_night = lp.refundable_per_night_amount if lp else None %}
+    {% set shown_night = ref_night or (lp.per_night_amount if lp else None) %}
+    {% set hit_target = ref_night and ref_night <= hw.target_price_per_night %}
     {% if lp %}
-      {% set progress = [[((hw.target_price_per_night / lp.per_night_amount) * 100)|round(1), 100]|min, 0]|max %}
+      {% set progress = [[((hw.target_price_per_night / shown_night) * 100)|round(1), 100]|min, 0]|max %}
     {% else %}
       {% set progress = 0 %}
     {% endif %}
@@ -277,9 +279,9 @@
 
       <div class="client-prices">
         <div class="client-price-current {{ 'on-target' if hit_target }}">
-          {% if lp %}{{ lp.currency }} {{ "%.2f"|format(lp.per_night_amount) }}
+          {% if lp %}{{ lp.currency }} {{ "%.2f"|format(shown_night) }}
             <span style="display:block;font-size:12px;color:var(--muted);font-family:var(--font-sans);margin-top:3px;">
-              lowest observed · per night · total {{ lp.currency }} {{ "%.2f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}{% if lp.rate_name %} · {{ lp.rate_name }}{% endif %}{% if lp.board_name %} · {{ lp.board_name }}{% endif %}{% if lp.excluded_fees_amount %}<br><span style="color:#a06010;">+ {{ lp.currency }} {{ "%.2f"|format(lp.excluded_fees_amount) }} taxes/fees payable at the property</span>{% endif %}
+              {% if ref_night %}lowest refundable{% else %}lowest observed{% endif %} · per night · total {{ lp.currency }} {{ "%.2f"|format(lp.refundable_total_amount if ref_night else lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}{% if ref_night %}{% if lp.refundable_rate_name %} · {{ lp.refundable_rate_name }}{% endif %}{% if lp.refundable_board_name %} · {{ lp.refundable_board_name }}{% endif %}{% else %}{% if lp.rate_name %} · {{ lp.rate_name }}{% endif %}{% if lp.board_name %} · {{ lp.board_name }}{% endif %}{% endif %}{% set shown_fees = lp.refundable_excluded_fees_amount if ref_night else lp.excluded_fees_amount %}{% if shown_fees %}<br><span style="color:#a06010;">+ {{ lp.currency }} {{ "%.2f"|format(shown_fees) }} taxes/fees payable at the property</span>{% endif %}
             </span>
           {% else %}—{% endif %}
         </div>

@@ -5,7 +5,11 @@
 {% macro hotel_card(hw, paused=False, today=None) %}
   {% set is_past = today and hw.check_out < today %}
   {% set lp = hw.latest %}
-  {% set hit = lp and lp.per_night_amount <= hw.target_price_per_night %}
+  {# The target and all alerting apply to the REFUNDABLE rate; the cheapest is
+     context. refundable_only decides which one the card leads with. #}
+  {% set ref_night = lp.refundable_per_night_amount if lp else None %}
+  {% set hit = ref_night and ref_night <= hw.target_price_per_night %}
+  {% set lead_refundable = hw.refundable_only and ref_night %}
   <div class="watch-card {{ 'target-met' if hit }}">
     <div class="card-badges">
       {% if is_past %}<span class="badge badge-past">past</span>{% endif %}
@@ -21,21 +25,46 @@
     </div>
 
     {% if lp %}
-      <div class="card-price">
-        <strong>${{ "%.2f"|format(lp.per_night_amount) }}</strong>/night
-        <span class="muted">· total ${{ "%.2f"|format(lp.total_amount) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
-          {% if lp.rate_name %}· {{ lp.rate_name }}{% endif %}
-          {% if lp.board_name %}· {{ lp.board_name }}{% endif %}
-          {% if lp.refundable is not none %}· {{ 'refundable' if lp.refundable else 'non-refundable' }}{% endif %}</span>
-        {% if lp.excluded_fees_amount %}
-          <div style="font-size:12px;color:#a06010;margin-top:3px;">
-            + ${{ "%.2f"|format(lp.excluded_fees_amount) }} taxes/fees payable at the property
-          </div>
-        {% endif %}
-      </div>
+      {% macro rate_line(amount, total, name, board, fees, tag, primary) %}
+        <div class="card-price" style="{{ '' if primary else 'margin-top:8px;' }}">
+          {% if primary %}
+            <strong>${{ "%.2f"|format(amount) }}</strong>/night
+          {% else %}
+            <span style="font-family:var(--font-mono);">${{ "%.2f"|format(amount) }}/night</span>
+          {% endif %}
+          <span class="muted">· {{ tag }}
+            {% if name %}· {{ name }}{% endif %}
+            {% if board %}· {{ board }}{% endif %}
+            · total ${{ "%.2f"|format(total) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}</span>
+          {% if fees %}
+            <div style="font-size:12px;color:#a06010;margin-top:3px;">
+              + ${{ "%.2f"|format(fees) }} taxes/fees payable at the property
+            </div>
+          {% endif %}
+        </div>
+      {% endmacro %}
+
+      {% if ref_night %}
+        {{ rate_line(ref_night, lp.refundable_total_amount, lp.refundable_rate_name,
+                     lp.refundable_board_name, lp.refundable_excluded_fees_amount,
+                     'refundable', lead_refundable) }}
+      {% else %}
+        <div class="card-price muted" style="font-size:14px;">No refundable rate available.</div>
+      {% endif %}
+
+      {% if not ref_night or lp.per_night_amount < ref_night %}
+        {{ rate_line(lp.per_night_amount, lp.total_amount, lp.rate_name, lp.board_name,
+                     lp.excluded_fees_amount,
+                     'cheapest' ~ (' · non-refundable' if lp.refundable is false else ''),
+                     not lead_refundable) }}
+      {% endif %}
       <div class="card-meta">
         <span>target ${{ "%.2f"|format(hw.target_price_per_night) }}/night</span>
-        <span>{{ 'TARGET MET ✓' if hit else 'above target' }}</span>
+        {% if not ref_night %}
+          <span class="muted">no refundable rate to compare</span>
+        {% else %}
+          <span>{{ 'TARGET MET ✓' if hit else 'above target' }} <span class="muted">(refundable)</span></span>
+        {% endif %}
       </div>
     {% else %}
       <div class="card-price muted">No price yet — after the next check.</div>
@@ -365,30 +394,48 @@ async function toggleHotelHistory(id, btn) {
     return;
   }
   const prices = data.map(d => parseFloat(d.per_night_amount));
+  const refPrices = data.map(d => d.refundable_per_night_amount === null
+      || d.refundable_per_night_amount === undefined
+      ? null : parseFloat(d.refundable_per_night_amount));
+  const hasRef = refPrices.some(v => v !== null);
   const labels = data.map(d => d.checked_at.slice(0, 10));
-  const min = Math.min(...prices).toFixed(0);
-  const max = Math.max(...prices).toFixed(0);
-  const current = prices[prices.length - 1].toFixed(0);
+  const series = hasRef ? refPrices.filter(v => v !== null) : prices;
+  const min = Math.min(...series).toFixed(2);
+  const max = Math.max(...series).toFixed(2);
+  const current = series[series.length - 1].toFixed(2);
   panel.innerHTML = `
     <div style="display:flex;gap:20px;margin:10px 0 4px;font-size:12px;color:var(--muted);">
       <div>current<strong style="font-family:var(--font-mono);color:var(--text);display:block;font-size:16px">$${current}</strong></div>
       <div>lowest<strong style="font-family:var(--font-mono);color:var(--accent);display:block;font-size:16px">$${min}</strong></div>
       <div>highest<strong style="font-family:var(--font-mono);color:#e05252;display:block;font-size:16px">$${max}</strong></div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">per night</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">
+      per night — ${hasRef ? 'refundable' : 'cheapest'}</div>
     <div style="position:relative;height:150px;"><canvas id="hotel-chart-${id}"></canvas></div>`;
   const ctx = document.getElementById('hotel-chart-' + id).getContext('2d');
   hotelCharts[id] = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [{
-      data: prices, borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.06)',
-      pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#1D9E75',
-      tension: 0.3, fill: true, borderWidth: 2,
-    }]},
+    data: { labels, datasets: [
+      // Refundable is the figure alerts fire on, so it leads. Cheapest is drawn
+      // dashed underneath as context — it is often a different room type.
+      ...(hasRef ? [{
+        label: 'refundable', data: refPrices, borderColor: '#1D9E75',
+        backgroundColor: 'rgba(29,158,117,0.06)', pointRadius: 4, pointHoverRadius: 6,
+        pointBackgroundColor: '#1D9E75', tension: 0.3, fill: true, borderWidth: 2,
+        spanGaps: true,
+      }] : []),
+      {
+        label: 'cheapest', data: prices, borderColor: '#8a8f8c',
+        pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: '#8a8f8c',
+        tension: 0.3, fill: false, borderWidth: 1.5, borderDash: [4, 3],
+      },
+    ]},
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: (c) => '$' + c.parsed.y.toFixed(2) + '/night' } } },
+      plugins: { legend: { display: true, position: 'bottom',
+                   labels: { boxWidth: 10, font: { size: 11 } } },
+        tooltip: { callbacks: { label: (c) => c.dataset.label + ': $'
+                     + c.parsed.y.toFixed(2) + '/night' } } },
       scales: { y: { ticks: { callback: v => '$' + v, font: { family: 'DM Mono' } } },
                 x: { ticks: { font: { size: 11 } } } }
     }
