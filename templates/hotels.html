@@ -9,7 +9,9 @@
      context. refundable_only decides which one the card leads with. #}
   {% set ref_night = lp.refundable_per_night_amount if lp else None %}
   {% set hit = ref_night and ref_night <= hw.target_price_per_night %}
-  {% set lead_refundable = hw.refundable_only and ref_night %}
+  {# The refundable rate is what the target and every alert are measured against,
+     so it always leads — regardless of refundable_only, which is now just a note.
+     Emphasis follows what can actually fire an alert, not a preference flag. #}
   <div class="watch-card {{ 'target-met' if hit }}">
     <div class="card-badges">
       {% if is_past %}<span class="badge badge-past">past</span>{% endif %}
@@ -25,13 +27,14 @@
     </div>
 
     {% if lp %}
-      {% macro rate_line(amount, total, name, board, fees, label, primary) %}
-        <div class="rate {{ 'rate-primary' if primary else 'rate-secondary' }}">
+      {% macro rate_line(amount, total, name, board, fees, label, note, primary, alerting=False) %}
+        <div class="rate {{ 'rate-primary' if primary else 'rate-secondary' }}{{ ' rate-alerting' if alerting }}">
           <div class="rate-head">
             <span class="rate-tag">{{ label }}</span>
             <span class="rate-amount">${{ "%.2f"|format(amount) }}<span class="rate-unit">/night</span></span>
           </div>
           <div class="rate-detail">
+            {%- if note %}{{ note }} · {% endif -%}
             {%- if name %}{{ name }}{% endif -%}
             {%- if board %} · {{ board }}{% endif -%}
             {%- if name or board %} · {% endif -%}
@@ -44,16 +47,16 @@
       {% if ref_night %}
         {{ rate_line(ref_night, lp.refundable_total_amount, lp.refundable_rate_name,
                      lp.refundable_board_name, lp.refundable_excluded_fees_amount,
-                     'refundable', lead_refundable) }}
+                     'refundable', '', true, alerting=true) }}
       {% else %}
         <div class="rate-none">No refundable rate available for these dates.</div>
       {% endif %}
 
       {% if not ref_night or lp.per_night_amount < ref_night %}
         {{ rate_line(lp.per_night_amount, lp.total_amount, lp.rate_name, lp.board_name,
-                     lp.excluded_fees_amount,
-                     'cheapest' ~ (' · non-refundable' if lp.refundable is false else ''),
-                     not lead_refundable) }}
+                     lp.excluded_fees_amount, 'cheapest',
+                     'non-refundable' if lp.refundable is false else '',
+                     not ref_night) }}
       {% endif %}
 
       <div class="card-meta">
