@@ -25,22 +25,19 @@
     </div>
 
     {% if lp %}
-      {% macro rate_line(amount, total, name, board, fees, tag, primary) %}
-        <div class="card-price" style="{{ '' if primary else 'margin-top:8px;' }}">
-          {% if primary %}
-            <strong>${{ "%.2f"|format(amount) }}</strong>/night
-          {% else %}
-            <span style="font-family:var(--font-mono);">${{ "%.2f"|format(amount) }}/night</span>
-          {% endif %}
-          <span class="muted">· {{ tag }}
-            {% if name %}· {{ name }}{% endif %}
-            {% if board %}· {{ board }}{% endif %}
-            · total ${{ "%.2f"|format(total) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}</span>
-          {% if fees %}
-            <div style="font-size:12px;color:#a06010;margin-top:3px;">
-              + ${{ "%.2f"|format(fees) }} taxes/fees payable at the property
-            </div>
-          {% endif %}
+      {% macro rate_line(amount, total, name, board, fees, label, primary) %}
+        <div class="rate {{ 'rate-primary' if primary else 'rate-secondary' }}">
+          <div class="rate-head">
+            <span class="rate-tag">{{ label }}</span>
+            <span class="rate-amount">${{ "%.2f"|format(amount) }}<span class="rate-unit">/night</span></span>
+          </div>
+          <div class="rate-detail">
+            {%- if name %}{{ name }}{% endif -%}
+            {%- if board %} · {{ board }}{% endif -%}
+            {%- if name or board %} · {% endif -%}
+            total ${{ "%.2f"|format(total) }} for {{ lp.nights }} night{{ 's' if lp.nights != 1 }}
+            {%- if fees %} · <span class="rate-fees">+${{ "%.2f"|format(fees) }} at property</span>{% endif -%}
+          </div>
         </div>
       {% endmacro %}
 
@@ -49,7 +46,7 @@
                      lp.refundable_board_name, lp.refundable_excluded_fees_amount,
                      'refundable', lead_refundable) }}
       {% else %}
-        <div class="card-price muted" style="font-size:14px;">No refundable rate available.</div>
+        <div class="rate-none">No refundable rate available for these dates.</div>
       {% endif %}
 
       {% if not ref_night or lp.per_night_amount < ref_night %}
@@ -58,6 +55,7 @@
                      'cheapest' ~ (' · non-refundable' if lp.refundable is false else ''),
                      not lead_refundable) }}
       {% endif %}
+
       <div class="card-meta">
         <span>target ${{ "%.2f"|format(hw.target_price_per_night) }}/night</span>
         {% if not ref_night %}
