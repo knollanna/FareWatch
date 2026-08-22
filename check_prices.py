@@ -265,6 +265,30 @@ def check_all_watches():
 
 
 # ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
+
+# An alert has to be worth an email. Hotel rates wobble by pennies between checks
+# — and the "cheapest" rate can flip between room types — so "any new low" fired
+# on a 7-cent drop (2026-08-21: "USD 401/night down from USD 401", twice in one
+# evening). A drop must now beat the last alerted low by BOTH of these to count.
+#
+# Tune here. The percentage is what scales sensibly across price points; the
+# absolute floor stops trivial amounts. NOTE the floor binds hardest on cheap
+# rooms — at $80/night it demands ~19% — so lower it if budget properties ever
+# get watched.
+MIN_DROP_PCT = 0.05      # 5% off the previous alerted low
+MIN_DROP_ABS = 15.00     # ...and at least this many currency units per night
+
+
+def _is_meaningful_drop(new_low, previous_low):
+    """True if `new_low` beats `previous_low` by enough to be worth an alert.
+
+    No previous low means nothing has been alerted for this watch yet, so the
+    first time it comes in under target always fires.
+    """
+    if previous_low is None:
+        return True
+    required = max(previous_low * MIN_DROP_PCT, MIN_DROP_ABS)
+    return (previous_low - new_low) >= required
 # Phase 1: check active hotel watches, store each check in hotel_price_history.
 # Alerts + hotel error emails come in Phase 2 (this only stores + logs).
 
@@ -412,7 +436,7 @@ def check_all_hotel_watches():
         # Baseline from sent_alerts (successful sends only) → swallow-safe, and a
         # failed send is retried next run instead of being lost.
         alerted_low = get_hotel_alerted_low(hw["id"])
-        if nightly <= target and (alerted_low is None or nightly < alerted_low):
+        if nightly <= target and _is_meaningful_drop(nightly, alerted_low):
             print(f"  New low under target — sending hotel alert(s).")
             email_ok = slack_ok = False
             try:
@@ -431,8 +455,10 @@ def check_all_hotel_watches():
                 supabase.table("sent_alerts").insert(
                     {"hotel_watch_id": hw["id"], "price": nightly}
                 ).execute()
-        elif nightly <= target:
-            print(f"  at/below target but not a new alerted low — skipping.")
+        elif nightly <= target and alerted_low is not None:
+            need = max(alerted_low * MIN_DROP_PCT, MIN_DROP_ABS)
+            print(f"  at/below target but only {alerted_low - nightly:+.2f} vs the last "
+                  f"alerted {alerted_low:.2f} (need {need:.2f}) — skipping.")
         print()
 
     print("Hotel check done."
