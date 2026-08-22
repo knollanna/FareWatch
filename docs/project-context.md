@@ -140,6 +140,48 @@ services), matching the local `.venv`.
 `render.yaml` (`sync: false` secrets set in the Render dashboard). App password is
 currently `REDACTED`.
 
+**Email deliverability — DNS and SendGrid settings that must not drift
+(set up 2026-08-22).** A client on Yahoo never received a fare alert. SendGrid's
+Activity Feed said *Delivered* with `250 ok dirdel`, so Yahoo accepted the message
+at SMTP and then discarded it — a bounce would have been visible, this was not.
+Cause: mail claiming to be from `travel@annaknoll.com` was DKIM-signed by
+`sendgrid.net` with a `sendgrid.net` return-path, so neither identifier aligned
+with the From domain. Gmail flagged it in the open as "via sendgrid.net". Yahoo
+has enforced alignment since Feb 2024 and is happy to accept-then-drop.
+
+Fixed by **SendGrid Domain Authentication** (Settings → Sender Authentication),
+which added three CNAMEs at Cloudflare. Verified headers now read
+`dkim=pass header.i=@annaknoll.com header.s=s1`, `spf=pass` via
+`em5746.annaknoll.com`, `dmarc=pass header.from=annaknoll.com`.
+
+Standing rules — each of these silently breaks authentication if changed:
+
+- **Every SendGrid record in Cloudflare stays DNS-only (grey cloud).** Proxying
+  makes Cloudflare answer with its own IPs; SendGrid's periodic re-validation then
+  fails and mail quietly reverts to `sendgrid.net` signing. The DKIM selectors are
+  not web traffic at all — receivers fetch them over DNS — and the return-path
+  subdomain is SMTP. There is no origin of ours to protect, so the orange cloud
+  buys nothing here.
+- **Do NOT add SendGrid to the root SPF record.** It is
+  `v=spf1 include:_spf.google.com ~all` and must stay that way for Workspace mail;
+  the `em5746` subdomain carries its own SPF and aligns as a subdomain.
+- **Click tracking is OFF and must stay off.** It rewrote every link through
+  SendGrid's redirector — including `{BASE_URL}/client/{token}`, so **each client's
+  access token was travelling through a third party and landing in their click
+  logs**. That is the exact leak `Referrer-Policy: no-referrer` in `app.py` exists
+  to prevent. The rewritten links were plain `http://` as well.
+- **Open tracking is OFF.** Nothing reads it (`/usage` pulls only `requests`), it
+  appended an `http://` 1×1 pixel, and Apple Mail Privacy Protection makes open
+  data meaningless anyway.
+- **A SendGrid 202 means queued, not delivered.** `_sendgrid_send` returns True on
+  202, so the swallow-safe dedup baseline treats an accepted-then-dropped message
+  as a successful send. Ground truth is the Activity Feed and the Suppressions
+  lists (Bounces / Blocks / Spam Reports / Invalid), where a listed address is
+  dropped silently while the API still returns 202.
+- **DMARC:** still to add as `v=DMARC1; p=none; rua=mailto:travel@annaknoll.com`.
+  `p=none` changes no delivery behaviour and buys aggregate reports. Do not move to
+  quarantine/reject without reading those reports first.
+
 ---
 
 ## 6. Feature history (what was built, roughly in order)
