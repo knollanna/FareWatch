@@ -929,6 +929,28 @@ input, select { font-family: var(--font-sans); }
 
 .muted { color: var(--muted); }
 
+/* two rates per hotel card: refundable (what alerts fire on) + cheapest context.
+   They can differ by a cent, so the hierarchy has to come from size and colour —
+   .card-price alone made both read as the headline number. */
+.rate { display: flex; flex-direction: column; gap: 3px; }
+.rate + .rate { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.rate-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rate-tag {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--muted);
+}
+.rate-primary .rate-tag { color: var(--accent); }
+.rate-amount { font-family: var(--font-mono); white-space: nowrap; }
+.rate-primary .rate-amount { font-size: 20px; font-weight: 500; color: var(--text); }
+.rate-secondary .rate-amount { font-size: 14px; color: var(--muted); }
+.rate-unit { font-size: 12px; color: var(--muted); }
+.rate-detail { font-size: 12px; color: var(--muted); line-height: 1.45; }
+/* Not --amber: that is #e8a020, ~2.2:1 on white and unreadable as text. This is
+   a darkened amber for the admin card only; the client page uses the audited
+   --amber from .client-theme (#8A5A00, 5.93:1). */
+.rate-fees { color: #a06010; white-space: nowrap; }   /* 5.3:1 on white */
+.rate-none { font-size: 13px; color: var(--muted); }
+
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
   .header { padding: 0 16px; }
