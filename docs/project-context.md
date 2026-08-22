@@ -110,8 +110,22 @@ git add supabase/migrations/ && git commit
 supabase db push                # apply to prod (CLI is linked + baselined)
 ```
 Details in `supabase/README.md`. Local stack needs Docker Desktop running.
-**Gotcha:** when adding a column the app SELECTs, push the migration to prod
-**before** deploying the code, or prod 500s on the missing column.
+**Gotcha — migration and deploy are ONE operation, migration first.** Any column
+the app *reads or writes*: push the migration before the code ships. It bit twice
+in two days (2026-08-21, 2026-08-22), both times because the wording used to say
+only "SELECTs":
+  * a column the **web app reads** missing in prod → 500 on the page;
+  * a column the **cron writes** missing in prod → `.execute()` raises, the hotel
+    checker dies mid-run and the job exits non-zero. Flights survive (the two
+    subsystems are isolated in `__main__`), so the symptom is a half-failed cron,
+    not an obvious outage.
+The reverse gap — migration applied, old code still running — is usually harmless
+*except* when a migration rewrites values the old code reads (the 2026-08-21
+per-person → per-night conversion rewrote `sent_alerts.price`, which would have
+made the old code fire a bogus alert). Don't leave that gap across a cron run.
+**`supabase db push --linked --dry-run` is NOT a push.** It prints "Would push
+these migrations"; the real run prints "Applying migration ...". Check which one
+you got before deploying.
 
 **Deploy:** push to `main` → Render auto-deploys both web + cron. Free-tier web
 spins down after ~15 min idle (cold start on next visit) — normal, and the cron
