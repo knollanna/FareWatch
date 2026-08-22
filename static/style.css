@@ -939,7 +939,10 @@ input, select { font-family: var(--font-sans); }
   font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--muted);
 }
-.rate-primary .rate-tag { color: var(--accent); }
+/* Accent means "this is the number alerts fire on" — only ever the refundable
+   rate. A card with no refundable rate leads with the cheapest for size, but its
+   tag stays muted, because nothing there can trigger anything. */
+.rate-alerting .rate-tag { color: var(--accent); }
 .rate-amount { font-family: var(--font-mono); white-space: nowrap; }
 .rate-primary .rate-amount { font-size: 20px; font-weight: 500; color: var(--text); }
 .rate-secondary .rate-amount { font-size: 14px; color: var(--muted); }
