@@ -285,6 +285,52 @@ def get_lowest_hotel_rate(hotel_id, check_in, check_out, guests=1,
     return None, "LiteAPI rate limit exceeded after retries"
 
 
+def get_hotel_rate_pair(hotel_id, check_in, check_out, guests=1,
+                        currency="USD", guest_nationality="US"):
+    """Cheapest rate overall AND cheapest refundable rate, for one stay.
+
+    Returns (rates, error) where rates is
+        {"cheapest": <rate or None>, "refundable": <rate or None>}
+    and each rate is whatever get_lowest_hotel_rate returns.
+
+    TWO calls on purpose. The alternative — one unfiltered call, split locally on
+    `cancellationPolicies.refundableTag` — is what we moved away from: the tag is
+    absent or ambiguous often enough that rates would land in neither bucket, and
+    LiteAPI's own `refundableRatesOnly` filter is authoritative (docs §7). The
+    cost is 2 requests per watch per check; searches are free, so this is a
+    fair-use question, not a billing one.
+
+    A missing refundable rate is NOT an error — plenty of stays have none. It
+    comes back as {"refundable": None} with error None. A hard failure on the
+    cheapest call fails the whole pair, since that's the figure everything else
+    hangs off.
+    """
+    cheapest, err = get_lowest_hotel_rate(
+        hotel_id, check_in, check_out, guests=guests, refundable_only=False,
+        currency=currency, guest_nationality=guest_nationality)
+    if err:
+        return None, err
+    if cheapest is None:
+        return {"cheapest": None, "refundable": None}, None   # genuinely no rooms
+
+    # Already refundable? Then it is also the cheapest refundable — don't pay for
+    # a second call to be told the same thing.
+    if cheapest.get("refundable") is True:
+        return {"cheapest": cheapest, "refundable": cheapest}, None
+
+    time.sleep(0.5)   # same spacing the cron uses between watches
+
+    refundable, err2 = get_lowest_hotel_rate(
+        hotel_id, check_in, check_out, guests=guests, refundable_only=True,
+        currency=currency, guest_nationality=guest_nationality)
+    if err2:
+        # Don't lose a good cheapest reading because the second call failed;
+        # record it and let the caller store what it has.
+        print(f"  [liteapi] refundable lookup failed ({err2}) — storing cheapest only.")
+        refundable = None
+    return {"cheapest": cheapest, "refundable": refundable}, None
+
+
 def find_places(text_query, types="hotel", limit=10):
     """Free-text location/hotel lookup via LiteAPI's /data/places.
 

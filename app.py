@@ -864,7 +864,7 @@ def hotel_history(hotel_id):
     chart. Kept off the client page — hotel history is visible to Anna only."""
     rows = (
         supabase.table("hotel_price_history")
-        .select("per_night_amount, total_amount, "
+        .select("per_night_amount, refundable_per_night_amount, total_amount, "
                 "currency, checked_at, nights, refundable, rate_name")
         .eq("hotel_watch_id", hotel_id)
         .order("checked_at", desc=False)

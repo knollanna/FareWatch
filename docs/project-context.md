@@ -372,6 +372,29 @@ currently `REDACTED`.
   since the cron runs UTC while hotel dates are local. Hotel watches still have no
   `is_archived`, so this is the whole guard; the flights-side "auto-close past-date
   watches" item is still open and the two would sensibly be built together.
+- **Refundable and cheapest are tracked separately; alerts fire on REFUNDABLE only
+  (2026-08-21).** The tracked "cheapest" rate flips between room types and between
+  refundable and non-refundable, so it once swapped a refundable queen for a
+  non-refundable twin to save 7c and reported it as a new low. Each check now
+  fetches both and stores them side by side in one row: existing columns = cheapest
+  overall, `refundable_*` = cheapest genuinely refundable (NULL when none exists —
+  the UI must not render that as zero). **`target_price_per_night` and every alert
+  apply to the refundable figure**; the cheapest is display context and can never
+  move `sent_alerts.price`. A watch whose only rates are non-refundable therefore
+  never alerts, however cheap — deliberate: a client is normally booked refundable.
+  `refundable_only` is now a *display preference* (which rate the card leads with),
+  not a request filter. Two LiteAPI calls per watch per check, **except** when the
+  cheapest is already refundable, which skips the second. Chose parallel columns
+  over a `rate_kind` discriminator with two rows: one-row-per-check keeps
+  `_attach_hotel_extras` and the chart unchanged. Wart: the old `refundable`
+  boolean now means "was the *cheapest* refundable", beside `refundable_*` columns —
+  not renamed, because a rename breaks the deployed code the instant the migration
+  lands (see 2026-08-21 cron crash).
+- **Alerts need a MEANINGFUL drop (2026-08-21):** at least 5% AND at least 15/night
+  below the last alerted low (`MIN_DROP_PCT` / `MIN_DROP_ABS` in check_prices.py).
+  Hotel rates wobble by pennies; "any new low" fired twice in one evening on a 7c
+  move. The floor binds hardest on cheap rooms (~19% at $80/night) — lower it if
+  budget properties get watched. First alert for a watch still fires with no baseline.
 - **Hotels are tracked PER NIGHT, not per person (2026-08-21).** Hotels sell
   room-nights — a queen room costs the same whether one or two people sleep in it.
   Per-person was a *flights* idiom (fares really are per passenger) carried across
