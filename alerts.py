@@ -497,7 +497,7 @@ def _build_hotel_alert_html(hw, rate, previous_low, currency):
   <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
     <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{currency} {nightly:,.2f}/night{note}</div>
     <div style="font-size:13px;color:#555;margin-top:3px;">{rate.get('rate_name') or 'Room'}{board_html} · total {currency} {rate['total_amount']:,.2f} for {nights} night{'s' if nights != 1 else ''}{refund_html}</div>
-    {f'<div style="font-size:12px;color:#a06010;margin-top:3px;">{_fees_note(rate, currency).lstrip(" +").capitalize()}</div>' if _fees_note(rate, currency) else ''}
+    {f'<div style="font-size:12px;color:#a06010;margin-top:3px;">{_fees_note(rate, currency).lstrip(" +")}</div>' if _fees_note(rate, currency) else ''}
   </div>
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Stay</td><td style="padding:4px 0;text-align:right;">{hw['check_in']} – {hw['check_out']} ({guests} guest{'s' if guests != 1 else ''})</td></tr>
