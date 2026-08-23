@@ -1,8 +1,19 @@
 # Hotels (LiteAPI) — go-live review: fixes applied & open items
 
+> ## 🗄️ HISTORICAL — superseded
+>
+> Hotels went **live in production on 2026-08-21**, and much of what this document
+> describes has since changed: prices are tracked **per night** (not per person),
+> `rooms` is retired, refundable and cheapest rates are tracked separately with
+> **alerts on the refundable one**, and the picker is built on `/data/places`.
+>
+> **For current behaviour read `docs/project-context.md` §7 (decisions/gotchas)
+> and §9 (status).** This file is kept for the reasoning and the incident history,
+> not as a description of how the system works today.
+
 > Outcome of the pre-production review of the hotel-monitoring feature
-> (2026-08-04), run against `docs/hotel-go-live-review.md`. Everything below is
-> in the working tree on `main` — **not committed**.
+> (2026-08-04), run against `docs/hotel-go-live-review.md`. Everything below was
+> committed and is live; §1 was later **retracted** as wrong.
 >
 > Companion docs: `docs/hotel-go-live-review.md` (what to review) and
 > `docs/project-context.md` §7 (gotchas) / §9 (go-live checklist).

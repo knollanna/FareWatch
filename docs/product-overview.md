@@ -127,11 +127,16 @@ heads-up email so nothing fails silently.
 ## Status & roadmap
 
 **Live today:** flight monitoring, stops-aware email + Slack alerts, client
-status pages, price history, a Trends page (incl. cheapest day to fly), and the
-advisor dashboard — running in production.
+status pages, price history, a Trends page (incl. cheapest day to fly), the
+advisor dashboard, and **nonstop-only watches** for clients who will only fly
+direct — all running in production.
 
-**In progress:** hotel price monitoring (the database is ready; the hotel
-pricing integration is paused pending access to Duffel's Stays product).
+**Hotels are live too** (since August 2026), built on LiteAPI after Duffel's
+Stays product turned out to be sales-gated. Watch a specific property and dates,
+get alerted when the nightly rate drops under target. Rates are tracked per night
+rather than per person, the cheapest **refundable** rate is the one that triggers
+an alert, and any taxes or fees payable at the property are shown alongside so the
+number a client sees is the number they pay.
 
 **Ideas for later:** a "cheapest day to fly over time" view (now that per-date
 prices are being captured), automatic closing of past-date watches, and a more
