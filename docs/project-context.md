@@ -123,9 +123,16 @@ The reverse gap — migration applied, old code still running — is usually har
 *except* when a migration rewrites values the old code reads (the 2026-08-21
 per-person → per-night conversion rewrote `sent_alerts.price`, which would have
 made the old code fire a bogus alert). Don't leave that gap across a cron run.
-**`supabase db push --linked --dry-run` is NOT a push.** It prints "Would push
-these migrations"; the real run prints "Applying migration ...". Check which one
-you got before deploying.
+**Don't use `--dry-run`. Just run the push.**
+```
+supabase db push --linked
+```
+It lists exactly what it will apply and asks to confirm before doing anything, so
+it gives you the same information the dry run does without the failure mode. The
+dry run prints "Would push these migrations" and stops; the real run prints
+"Applying migration ...". Mistaking one for the other deployed code against a
+missing column three times (2026-08-21 twice, 2026-08-22), each time because the
+dry run looked like it had done the job. Dropped from the procedure 2026-08-22.
 
 **Deploy:** push to `main` → Render auto-deploys both web + cron. Free-tier web
 spins down after ~15 min idle (cold start on next visit) — normal, and the cron
