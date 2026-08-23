@@ -96,6 +96,13 @@
       <span>{{ w.date_from }} – {{ w.date_to }}</span>
       <span>{{ w.passengers }} pax</span>
       <span>{{ "round-trip" if w.trip_type == "round_trip" else "one-way" }}</span>
+      {% if w.nonstop_only %}
+        {% if lp and lp.price_nonstop %}
+          <span>nonstop only</span>
+        {% else %}
+          <span style="color:#a06010;">nonstop only — none on these dates</span>
+        {% endif %}
+      {% endif %}
       {% if lp %}
         {% if lp.stops_text %}<span>{{ lp.stops_text }}</span>{% endif %}
         <span>checked {{ lp.checked_at[:10] }}</span>
@@ -216,6 +223,11 @@
           <div class="form-field">
             <label>passengers</label>
             <input type="number" name="passengers" value="{{ w.passengers }}" min="1" max="9" required>
+          </div>
+          <div class="form-field" style="align-self:end;">
+            {# Material: toggling this changes which tier alerts, so saving it
+               resets the watch's per-tier baseline. #}
+            <label><input type="checkbox" name="nonstop_only" {{ 'checked' if w.nonstop_only }}> nonstop only</label>
           </div>
         </div>
         <div class="form-grid" style="margin-top:10px;">
@@ -380,6 +392,9 @@
         <div class="form-field">
           <label for="f_pax">passengers</label>
           <input type="number" id="f_pax" name="passengers" min="1" max="9" value="1" required>
+        </div>
+        <div class="form-field" style="align-self:end;">
+          <label><input type="checkbox" name="nonstop_only" id="f_nonstop"> nonstop only</label>
         </div>
       </div>
 

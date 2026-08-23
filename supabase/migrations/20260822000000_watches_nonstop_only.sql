@@ -1,0 +1,24 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Flights: let a watch care only about nonstop service.
+--
+-- Some clients will only fly direct, so a 1-stop fare beating target is noise to
+-- them. The stop tiers are already tracked separately (price_history.price_nonstop
+-- / price_1_stop / price_2_plus_stops, with a per-tier dedup baseline in
+-- sent_alerts.alerted_price_*), so this is a filter on which tier may ALERT, not
+-- new plumbing — the same shape hotels ended up with for refundable vs cheapest.
+--
+-- All tiers are still fetched, stored and charted. Filtering at the Duffel search
+-- instead would throw away the 1-stop and 2+ history, break the tier table and
+-- Trends for that watch, and lose the "nonstop is $780 but 1-stop is $540"
+-- context that is often the useful conversation with a client.
+--
+-- Fallback (deliberate, differs from hotels): if a route has NO nonstop service
+-- for these dates, the watch alerts on the cheapest tier instead and says why.
+-- Hotels go silent in the equivalent case; a flight watch going permanently quiet
+-- on a route that simply has no direct service would be worse than a caveated
+-- alert.
+--
+-- Additive, defaulted, non-null: every existing watch keeps today's behaviour.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE watches
+  ADD COLUMN IF NOT EXISTS nonstop_only boolean NOT NULL DEFAULT false;
