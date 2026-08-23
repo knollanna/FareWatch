@@ -205,6 +205,25 @@ def check_all_watches():
             ("2+ stops", "price_2_plus_stops", "2_plus"),
         ]
         tier_details = stop_tiers.get("details") or {}
+
+        # A nonstop-only watch alerts on the Nonstop tier alone — a 1-stop fare
+        # under target is noise to a client who will only fly direct. The other
+        # tiers are still stored and charted; they just can't alert.
+        #
+        # Fallback: if the route has NO nonstop service for these dates, fall back
+        # to the normal tiers rather than going permanently silent, and flag it so
+        # the alert says why. Differs from hotels, where no refundable rate means
+        # no alert — a flight watch on a route with no direct service would
+        # otherwise never say anything at all.
+        nonstop_only = bool(watch.get("nonstop_only"))
+        nonstop_unavailable = nonstop_only and stop_tiers.get("price_nonstop") is None
+        if nonstop_only and not nonstop_unavailable:
+            tier_specs = [t for t in tier_specs if t[2] == "nonstop"]
+            print("  nonstop-only watch — other tiers stored but not alerted on.")
+        elif nonstop_unavailable:
+            print("  nonstop-only watch, but no nonstop service for these dates "
+                  "— falling back to the cheapest tier.")
+
         improved = []
         for label, price_key, detail_key in tier_specs:
             cur = stop_tiers.get(price_key)
@@ -221,6 +240,9 @@ def check_all_watches():
                     "alerted_col": f"alerted_{price_key}",
                 })
 
+        if improved and nonstop_unavailable:
+            improved = [min(improved, key=lambda t: t["price"])]
+
         if improved:
             names = ", ".join(t["label"].lower() for t in improved)
             print(f"  New tier low(s) under target: {names} — sending alerts.")
@@ -229,7 +251,8 @@ def check_all_watches():
 
             # Email (failure here must not block Slack)
             try:
-                email_ok = send_alert(watch, improved, watch["passengers"], currency)
+                email_ok = send_alert(watch, improved, watch["passengers"], currency,
+                                      nonstop_unavailable=nonstop_unavailable)
                 if email_ok:
                     print(f"  ✉️  Email sent to {watch['client_email']}")
             except Exception as e:
@@ -237,7 +260,8 @@ def check_all_watches():
 
             # Slack (failure here must not block anything else)
             try:
-                slack_ok = send_slack_alert(watch, improved, watch["passengers"], currency)
+                slack_ok = send_slack_alert(watch, improved, watch["passengers"], currency,
+                                            nonstop_unavailable=nonstop_unavailable)
                 if slack_ok:
                     print(f"  💬 Slack notification sent")
             except Exception as e:
@@ -252,6 +276,13 @@ def check_all_watches():
                 for t in improved:
                     alert_row[t["alerted_col"]] = t["price"]
                 supabase.table("sent_alerts").insert(alert_row).execute()
+        elif nonstop_only and not nonstop_unavailable:
+            ns = stop_tiers.get("price_nonstop")
+            if ns is not None and ns > target:
+                print(f"  nonstop {currency} {ns:.2f} is above the {currency} {target:.2f} "
+                      f"target — cheaper tiers ignored on a nonstop-only watch.")
+            else:
+                print(f"  nonstop at/below target but not a new low — skipping.")
         elif price <= target:
             print(f"  at/below target but no tier hit a new low — skipping.")
 

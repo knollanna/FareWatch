@@ -35,6 +35,10 @@ BASE_URL = os.environ.get("BASE_URL", "https://farewatch.annaknoll.com")
 # Slack incoming webhook; if empty, Slack notifications are skipped silently.
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
+# Shown when a nonstop-only watch falls back because the route has no direct
+# service on these dates. One string so the three channels stay in step.
+NONSTOP_NOTE = ("This route has no nonstop service on these dates, so this is the cheapest option rather than a direct flight.")
+
 
 def _google_flights_url(origin, destination, date_from, passengers, exact_date=None):
     departure = exact_date[:10] if exact_date else date_from
@@ -124,7 +128,8 @@ def _tier_stops_line(detail):
 
 # ── Email (SendGrid) ────────────────────────────────────────────────────────────
 
-def _build_tier_alert_html(watch, improved, passengers, currency):
+def _build_tier_alert_html(watch, improved, passengers, currency,
+                           nonstop_unavailable=False):
     origin = watch["origin"]
     destination = watch["destination"]
     client_name = watch["client_name"]
@@ -167,6 +172,7 @@ def _build_tier_alert_html(watch, improved, passengers, currency):
   <p>Hi {client_name},</p>
   <p>Good news — a better fare just turned up for your <strong>{origin} → {destination}</strong> trip:</p>
   {blocks}
+  {f'<p style="font-size:13px;color:#a06010;margin:0 0 12px;">{NONSTOP_NOTE}</p>' if nonstop_unavailable else ''}
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Travel window</td><td style="padding:4px 0;text-align:right;">{watch['date_from']} – {watch['date_to']}</td></tr>
     <tr><td style="padding:4px 0;">Passengers</td><td style="padding:4px 0;text-align:right;">{pax_label}</td></tr>
@@ -183,7 +189,8 @@ def _build_tier_alert_html(watch, improved, passengers, currency):
 </html>"""
 
 
-def _build_tier_alert_text(watch, improved, passengers, currency):
+def _build_tier_alert_text(watch, improved, passengers, currency,
+                           nonstop_unavailable=False):
     origin = watch["origin"]
     destination = watch["destination"]
     target_pp = float(watch["target_price"]) / passengers
@@ -206,6 +213,8 @@ def _build_tier_alert_text(watch, improved, passengers, currency):
         if st:
             lines.append(f"  {st}")
         lines.append("")
+    if nonstop_unavailable:
+        lines += [NONSTOP_NOTE, ""]
 
     best = min(improved, key=lambda t: t["price"])
     exact_date = (best.get("detail") or {}).get("departing_at")
@@ -227,7 +236,8 @@ def _build_tier_alert_text(watch, improved, passengers, currency):
     return "\n".join(lines)
 
 
-def send_alert(watch, improved, passengers, currency="USD"):
+def send_alert(watch, improved, passengers, currency="USD",
+               nonstop_unavailable=False):
     """Email the client (cc Anna) about stop tier(s) hitting a new low under target.
 
     `improved` is a list of {label, price (total), previous_low (total|None),
@@ -248,8 +258,10 @@ def send_alert(watch, improved, passengers, currency="USD"):
     else:
         subject = f"Fare alert: {origin} → {destination} — {len(improved)} new fare lows"
 
-    html_body = _build_tier_alert_html(watch, improved, passengers, currency)
-    text_body = _build_tier_alert_text(watch, improved, passengers, currency)
+    html_body = _build_tier_alert_html(watch, improved, passengers, currency,
+                                      nonstop_unavailable=nonstop_unavailable)
+    text_body = _build_tier_alert_text(watch, improved, passengers, currency,
+                                      nonstop_unavailable=nonstop_unavailable)
 
     to_list = []
     if client_email and "@" in client_email and client_email != SENDER_EMAIL:
@@ -289,7 +301,8 @@ def send_alert(watch, improved, passengers, currency="USD"):
 
 # ── Slack ───────────────────────────────────────────────────────────────────────
 
-def send_slack_alert(watch, improved, passengers, currency="USD"):
+def send_slack_alert(watch, improved, passengers, currency="USD",
+                     nonstop_unavailable=False):
     """Post a Block Kit alert naming the stop tier(s) that hit a new low under target.
 
     Skips silently (returns False) if SLACK_WEBHOOK_URL is unset or `improved` empty.
@@ -316,6 +329,8 @@ def send_slack_alert(watch, improved, passengers, currency="USD"):
         lines.append(f"*{t['label']}:* ${pp:,.0f}/person{note}{extra}")
     lines.append(f"*Dates:* {dates} · {pax_label}")
     lines.append(f"*Target:* ${target_pp:,.0f}/person")
+    if nonstop_unavailable:
+        lines.append(f"_{NONSTOP_NOTE}_")
 
     best = min(improved, key=lambda t: t["price"])
     exact_date = (best.get("detail") or {}).get("departing_at")

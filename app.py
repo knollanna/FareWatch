@@ -260,6 +260,9 @@ def _stops_text(lp, trip_type):
 MATERIAL_WATCH_FIELDS = (
     "origin", "destination", "date_from", "date_to",
     "return_date_from", "return_date_to", "passengers",
+    # Toggling nonstop-only changes WHICH tier the watch alerts on, so the old
+    # per-tier lows are no longer the right baseline to beat.
+    "nonstop_only",
 )
 
 
@@ -545,6 +548,9 @@ def add_watch():
             "client_token": _get_or_create_token(client_email, request.form["client_name"].strip()),
             "is_active": True,
             "is_paused": False,
+            # Alert on the nonstop tier only. Other tiers are still stored and
+            # charted; see check_all_watches for the no-direct-service fallback.
+            "nonstop_only": request.form.get("nonstop_only") == "on",
         }
         supabase.table("watches").insert(watch).execute()
         flash(f"Watch added for {watch['origin']} → {watch['destination']}.")
@@ -738,6 +744,10 @@ def edit_watch(watch_id):
         "client_email": request.form["client_email"].strip(),
         "return_date_from": request.form.get("return_date_from") or None,
         "return_date_to": request.form.get("return_date_to") or None,
+        # Must be set here as well as in MATERIAL_WATCH_FIELDS: the epoch check
+        # compares current vs updates field by field, so omitting it would compare
+        # False against None and bump params_changed_at on every single edit.
+        "nonstop_only": request.form.get("nonstop_only") == "on",
     }
     # If the trip itself changed (route/dates/passengers), start a new history
     # epoch so the old trip's prices don't blend into the new one's chart/alerts.

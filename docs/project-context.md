@@ -428,6 +428,24 @@ Standing rules — each of these silently breaks authentication if changed:
   since the cron runs UTC while hotel dates are local. Hotel watches still have no
   `is_archived`, so this is the whole guard; the flights-side "auto-close past-date
   watches" item is still open and the two would sensibly be built together.
+- **Flights: `watches.nonstop_only` alerts on the Nonstop tier alone (2026-08-22).**
+  Some clients will only fly direct, so a 1-stop fare under target is noise. The
+  stop tiers were already tracked separately (`price_history.price_nonstop` /
+  `price_1_stop` / `price_2_plus_stops`, with per-tier baselines in
+  `sent_alerts.alerted_price_*`), so this is a filter on which tier may ALERT — the
+  same shape hotels use for refundable vs cheapest. **All tiers are still fetched,
+  stored and charted**; filtering at the Duffel search instead would destroy the
+  1-stop/2+ history, break the tier table and Trends, and lose the "nonstop $780 vs
+  1-stop $540" context. **Fallback differs from hotels on purpose:** a route with NO
+  nonstop service on those dates falls back to alerting on the single cheapest tier
+  with a caveat (`NONSTOP_NOTE` in alerts.py, carried by email/text/Slack alike),
+  because a flight watch going permanently silent on a route that simply has no
+  direct service is worse than a caveated alert. `nonstop_only` is in
+  `MATERIAL_WATCH_FIELDS`, so toggling it bumps `params_changed_at` and resets the
+  baseline — **it must therefore also be set in `edit_watch`'s `updates` dict**, or
+  the epoch check compares False against None and re-epochs on every single edit.
+  Flights deliberately have **no** minimum-drop threshold (unlike hotels): fares
+  move in dollars, not pennies.
 - **Refundable and cheapest are tracked separately; alerts fire on REFUNDABLE only
   (2026-08-21).** The tracked "cheapest" rate flips between room types and between
   refundable and non-refundable, so it once swapped a refundable queen for a
