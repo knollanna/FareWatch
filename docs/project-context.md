@@ -16,10 +16,12 @@ checks Duffel every 2 hours, records prices, and emails + Slacks her (and the
 client) when a fare hits target. Each client gets a private link to a live
 status page. Deployed at **farewatch.annaknoll.com**.
 
-**Hotels** now work too — same idea (watch a specific hotel + dates, alert when
-the nightly rate drops under target), built on **LiteAPI** after Duffel Stays
-turned out to be sales-gated (see §6/§9). Advisor-facing side is done; client-
-facing hotel display is the last pending piece.
+**Hotels** work too — same idea (watch a specific hotel + dates, alert when the
+nightly rate drops under target), built on **LiteAPI** after Duffel Stays turned
+out to be sales-gated (see §6/§9). **Live in production since 2026-08-21**:
+checking, alerts, the `/hotels` admin UI, and client-facing cards. Hotel prices
+are tracked **per night** (per room, one room) — never per person; a room costs
+what it costs however many people sleep in it.
 
 ---
 
@@ -47,9 +49,13 @@ External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
   `price_history` / `hotel_price_history`, fires alerts (swallow-safe).
 - `duffel.py` — flights. `get_lowest_fare(...)` returns `(price, currency,
   flight_details, error, stop_tiers, date_prices)`. Handles rate limits.
-- `hotel_prices.py` — hotels (LiteAPI). `get_lowest_hotel_rate(hotel_id, dates,
-  guests, rooms, refundable_only)` → `(rate, error)` shaped for `hotel_price_history`;
-  `find_hotels(city, country)` → hotel IDs for the add-watch picker.
+- `hotel_prices.py` — hotels (LiteAPI). Public surface:
+  `get_hotel_rate_pair(hotel_id, dates, guests)` → `{"cheapest", "refundable"}`,
+  what the cron calls (two API calls, or one when the cheapest is already
+  refundable); `get_lowest_hotel_rate(...)` → `(rate, error)`, the single-fetch
+  primitive underneath it; `find_places(text_query)` → free-text hotel/place
+  lookup for the picker; `find_hotels(city, country, hotel_name, place_id)` →
+  LiteAPI hotel IDs. **No `rooms` parameter** — multi-room was retired (§7).
 - `alerts.py` — email (SendGrid) + Slack (Block Kit) + error emails, for flights
   **and** hotels (`send_hotel_alert` / `send_hotel_slack_alert` / `send_hotel_error_alert`).
 - `usage.py` — `/usage` page (SendGrid/Duffel/Supabase/Render metrics).
@@ -71,7 +77,8 @@ shared password + anon key).
   `target_price` (**stored as TOTAL** = per-person × passengers), `trip_type`,
   `return_date_from/to`, `client_name/email/token`, `is_active`, `is_paused`,
   `is_archived` (closed/past), `last_error`, `booking_reference`, `booked_at`,
-  `params_changed_at` (set when a *material* edit changes the trip — see §7).
+  `params_changed_at` (set when a *material* edit changes the trip — see §7),
+  **`nonstop_only`** (alert on the Nonstop tier alone — see §7).
 - **`price_history`** — one row per check: `price` (overall cheapest total),
   `currency`, `checked_at`, flight details (`airline`, `flight_number`,
   `departing_at`, `returning_at`, `return_flight_number`, `stops_outbound`,
@@ -83,8 +90,24 @@ shared password + anon key).
   `alerted_price_2_plus_stops`). The per-tier `alerted_price_*` columns record
   what each **successful** alert went out at and are the alert **dedup baseline**
   (see §7) — added 2026-06-09 to fix the swallow bug.
-- **`hotel_watches`**, **`hotel_price_history`** — built, **unused** (Stays
-  blocked). `sent_alerts.hotel_watch_id` links to them.
+- **`hotel_watches`** — one hotel watch: `accommodation_id/name/city/country`
+  (LiteAPI), `check_in`, `check_out`, `guests`, **`target_price_per_night`** (the
+  live target), `refundable_only` (now only a *display* preference — see §7),
+  `is_active`, `last_error`, `consecutive_room_not_found`, `client_name/email/token`.
+  Legacy/unused, kept but not written: `rooms`, `target_price_per_night_per_person`,
+  `watch_mode`, `preferred_rate_code/name`.
+- **`hotel_price_history`** — one row per check. Cheapest rate overall in
+  `total_amount`, **`per_night_amount`** (the tracked figure = total ÷ nights),
+  `excluded_fees_amount` (taxes/fees charged at the property, not in the total),
+  `rate_name`, `board_name`, `board_type`, `refundable` (describes the *cheapest*
+  rate), `currency`, `nights`, `checked_at`. The cheapest **refundable** rate sits
+  alongside in `refundable_total_amount` / `refundable_per_night_amount` /
+  `refundable_excluded_fees_amount` / `refundable_rate_name` /
+  `refundable_board_name` / `refundable_board_type` — NULL when the stay has none,
+  which the UI shows as "none found", never as zero. Legacy, no longer written:
+  `per_night_per_person_amount`.
+- `sent_alerts.hotel_watch_id` links hotel alerts here; for those rows `price`
+  holds the **refundable** nightly figure (the dedup baseline).
 
 ---
 
@@ -234,7 +257,8 @@ Standing rules — each of these silently breaks authentication if changed:
     hotels pivoted to **LiteAPI/Nuitée** (self-serve, searches free — monetises
     bookings). Built in phases:
     - **P1** `hotel_prices.py` + cron checks active `hotel_watches`, stores net
-      `total` (+ per-night, per-night-per-person) in `hotel_price_history`.
+      `total` + per-night in `hotel_price_history`. (Originally also stored a
+      per-night-per-person figure; that unit was dropped 2026-08-21 — see §7.)
     - **P2** hotel alerts (email/Slack/error), swallow-safe (baseline from
       `sent_alerts`); migration made `sent_alerts.watch_id` nullable + CHECK
       exactly-one-of(watch_id, hotel_watch_id) + hotel_watch_id cascade.
@@ -281,6 +305,29 @@ Standing rules — each of these silently breaks authentication if changed:
     the history toggle is a 44px control with a ≥3:1 edge, and chart stop-tiers get
     distinct point *shapes* as well as colours because three hues 1.2:1 apart from
     each other are identical in grayscale.
+
+24. **Hotels go-live + hardening (2026-08-21/22)** — pre-production review, then
+    live. Highlights, all detailed in §7: prices switched from per-night-per-person
+    to **per night** (hotels sell room-nights); `rooms` retired after finding
+    multi-room never worked; the picker rebuilt on `/data/places` free-text search
+    after "Hilton Garden Inn" + London matched nothing (Heathrow files under
+    Hounslow); taxes/fees charged **at the property** captured and surfaced;
+    past-dated stays skipped; a **minimum-drop threshold** (5% and $15/night) after
+    two alerts fired on a 7-cent move; and refundable vs cheapest tracked
+    separately with **alerts on the refundable rate only**, after the tracked
+    "cheapest" swapped a refundable queen for a non-refundable twin to save seven
+    cents and called it a new low.
+25. **Email authentication (2026-08-22)** — a Yahoo client stopped receiving
+    alerts. SendGrid reported *Delivered*; Yahoo had accepted the message and
+    silently discarded it, because mail from `travel@annaknoll.com` was signed by
+    `sendgrid.net` and aligned with nothing. Fixed with SendGrid **Domain
+    Authentication**; DKIM/SPF/DMARC now all pass as `annaknoll.com`. Click and
+    open tracking turned **off** — click tracking had been rewriting the client
+    dashboard link through SendGrid's redirector, putting each client's access
+    **token** in a third party's logs. Standing rules in §5.
+26. **Nonstop-only flight watches (2026-08-22)** — `watches.nonstop_only`. Alerts
+    on the Nonstop tier alone, with a caveated fallback to the cheapest tier when a
+    route has no direct service. See §7.
 
 ---
 
@@ -572,55 +619,52 @@ Standing rules — each of these silently breaks authentication if changed:
 
 ## 9. Current status & what's pending
 
-**Live in production:** flight monitoring, stops-aware email+Slack alerts, client
-pages, dashboard with grouping/ordering/close, Trends (incl. cheapest day to fly),
-usage page, route price-history context on the add-watch form. **Hotels (LiteAPI):** the full feature is built + deployed — checking,
-alerts, `/hotels` admin UI, and client-facing cards. The price-history **chart is
-admin-only** — deliberately, per the LiteAPI storage terms in §7; the client page
-shows a "lowest observed" card with the live-rates caveat and no chart.
-**Hotels went live in production on 2026-08-21:** all migrations applied, the
-production `LITEAPI_KEY` set on both Render services, and the `/hotels` picker
-confirmed returning real inventory. Went live with the **§7 storage question still
-open** — that was a deliberate call, not an oversight.
+**Everything is live in production.** Flights: monitoring, stops-aware
+email+Slack alerts, client pages, dashboard with grouping/ordering/close, Trends
+(incl. cheapest day to fly), usage page, route price-history context on the
+add-watch form, and **nonstop-only watches**. **Hotels (LiteAPI), live since
+2026-08-21:** checking, alerts, the `/hotels` admin UI with place-based search,
+and client-facing cards. Tracked **per night**, with the cheapest **refundable**
+rate alerted on and the cheapest overall shown as context (§7).
 
-**Pending / next:**
-- **Hotels go-live checklist** — do these in order when ready to run hotels live.
-  Hotel migrations are applied locally + committed to the repo but **deliberately
-  NOT pushed to prod** (the feature is dormant, so we don't touch prod prematurely):
-  1. ✅ **DONE 2026-08-21.** All hotel migrations are applied in prod.
-     `20260602000000_add_hotel_tables` and `20260718000000_hotel_sent_alerts` had
-     already been pushed (2026-06-02 and 2026-07-18 — the "deliberately NOT pushed
-     to prod" note that used to live here was wrong). Only
-     `20260718010000_add_board_to_hotel_history` was outstanding, and a plain
-     `supabase db push --linked` applied it. **`--include-all` was NOT needed** —
-     an earlier note claiming otherwise reasoned from filename ordering instead of
-     the remote history, and has been retracted (`docs/hotel-go-live-fixes.md` §1).
-     **Always check `supabase migration list --linked` before assuming what prod
-     has.** `supabase login` first if the CLI session has expired; on macOS it
-     stores the token in the login keychain, so click **Always Allow** when
-     prompted (that dialog wants your Mac password, not a Supabase one).
-  2. ✅ **DONE 2026-08-21** — production **`LITEAPI_KEY`** (the **private** key;
-     the public one is for their whitelabel/Payment SDK, which we don't use) set
-     on Render as a per-service env var on **both** `farewatch` and
-     `farewatch-price-check`. Set per-service rather than via an Environment
-     Group: `render.yaml` declares it at service level with `sync: false`, and
-     **service-level vars override group values in Render**, so a group would have
-     been silently ignored unless the service rows were deleted first.
-     The key is read at *import* time (`hotel_prices.py`), so a running process
-     never picks up a change — only a redeploy does.
+The price-history **chart is admin-only** — deliberately, per the LiteAPI storage
+terms in §7; the client page shows a "lowest observed" card with the live-rates
+caveat and no chart.
 
-     Onboarding answers given, for the record: **commercial model = Account Credit
-     Card** (we never book through LiteAPI — the integration calls only
-     `POST /hotels/rates` and `GET /data/hotels`, so no traveller ever transacts);
-     **closed user group = No, public channels only** (`/client/<token>` has no
-     login — the token is a capability, not authentication, and hotel rates reach
-     clients by email too).
+The hotels go-live checklist (migrations → production key → confirm) is **done**;
+what was learned doing it is recorded in §5 (migration/deploy ordering) and §7
+(LiteAPI gotchas), and the retracted parts in `docs/hotel-go-live-fixes.md`.
 
-     ⚠️ Done with the §7 storage question still open — see §7.
-  3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.
-- **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
-  replaced it. Left here only as history.
+---
+
+### ⚠️ Open — the one that gets more expensive with time
+
+**The LiteAPI storage/retention question is unresolved** (§7). Hotels went live
+with it open; that was a deliberate call. Nothing LiteAPI has said covers what we
+retain — the account being approved is not the same as them agreeing to it. The
+no-persistence fallback is cheap now and gets less so as history accumulates, so
+this is worth settling before much more accrues. §7 has the wording to send.
+
+### Pending / next
+
+- **`/usage` doesn't count the hotel tables.** `get_supabase_usage()` counts
+  `watches` / `price_history` / `sent_alerts` only, so the 500 MB storage gauge —
+  the thing that decides when downsampling becomes real — understates.
+- **A SendGrid 202 means queued, not delivered** (§5). `_sendgrid_send` returns
+  True on 202, and that advances the swallow-safe dedup baseline, so a message a
+  provider accepts and then silently drops looks identical to a delivered one and
+  is never retried. Narrow, but it is the same class of bug the baseline exists to
+  prevent. Fixing it properly means the Activity API or a SendGrid event webhook.
+- **DMARC is at `p=none`** (added 2026-08-22). Read the `rua` aggregate reports
+  for a couple of weeks before considering `quarantine`; don't move on a hunch.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
   `date_prices` history to be meaningful.
 - **Downsampling** old `price_history` — build when storage approaches a threshold.
-- **Auto-close** past-date watches (currently a manual "close" button).
+- **Auto-close past-date watches** (flights: currently a manual "close" button).
+  Hotels already *skip* past-dated stays in the checker (§7) but have no
+  `is_archived`; the two are worth building together.
+- **Deferred hotel scaffolding** (§7): `watch_mode=2` / `preferred_rate_code`,
+  pinning a board type per watch, and a hotel edit route (no `params_changed_at`
+  epoch for hotels until there is one).
+- **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
+  replaced it. Kept here only as history.

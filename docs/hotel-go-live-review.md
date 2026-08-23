@@ -1,5 +1,16 @@
 # Hotels (LiteAPI) — go-live code review brief
 
+> ## 🗄️ HISTORICAL — superseded
+>
+> Hotels went **live in production on 2026-08-21**, and much of what this document
+> describes has since changed: prices are tracked **per night** (not per person),
+> `rooms` is retired, refundable and cheapest rates are tracked separately with
+> **alerts on the refundable one**, and the picker is built on `/data/places`.
+>
+> **For current behaviour read `docs/project-context.md` §7 (decisions/gotchas)
+> and §9 (status).** This file is kept for the reasoning and the incident history,
+> not as a description of how the system works today.
+
 > For a fresh session reviewing the hotel-monitoring feature before it's enabled
 > in production. Everything is committed to `main` and **works on sandbox**, but is
 > **dormant in prod** (no production `LITEAPI_KEY`, migrations not pushed to prod).
@@ -73,10 +84,11 @@ storage-terms gotchas), §8 (runbook), **§9 (go-live checklist)**.
    last one. `--include-all` was **not** needed; an earlier note here said it was,
    reasoning from filename order rather than `supabase migration list --linked`.
    See §7/§9 and `docs/hotel-go-live-fixes.md` §1.
-2. **🚧 BLOCKED on the ToS storage question (§7)** — settle it in writing with a
-   human at LiteAPI first. Then set the **production** `LITEAPI_KEY` on Render
-   (web + cron) — production key, never the sandbox one (test-hotel pollution).
-3. Add a hotel watch → **Run Now** on the `farewatch-price-check` cron to confirm.
+2. ✅ **DONE 2026-08-21** — production **`LITEAPI_KEY`** (the private key) set on
+   Render for both `farewatch` and `farewatch-price-check`. Done with the ToS
+   storage question **still open** — a deliberate call, see §7.
+3. ✅ **DONE 2026-08-21** — hotel watch added, cron confirmed writing history and
+   alerting.
 
 ## Running locally for review/testing
 - `supabase start` (needs Docker). If `anon` "permission denied for table …", apply

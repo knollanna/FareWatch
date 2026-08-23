@@ -7,8 +7,9 @@ hits the target. Each client also gets a private link to a live status page.
 
 Deployed at **https://farewatch.annaknoll.com** (Render).
 
-> Hotel monitoring is in progress (schema is built; the Duffel Stays integration
-> is paused pending Stays access on the Duffel account).
+> **Hotel monitoring is live** (since 2026-08-21), built on **LiteAPI** — Duffel
+> Stays was abandoned after it turned out to be sales-gated. Hotel rates are
+> tracked **per night**, and alerts fire on the cheapest **refundable** rate.
 
 ---
 
@@ -58,7 +59,11 @@ FareWatch is two programs that share one database — they never call each other
   (not assumed to be USD).
 - `usage.py` — powers the `/usage` page (SendGrid / Duffel / Supabase / Render
   consumption).
-- `duffel_stays.py` — *(not built yet)* hotel integration, Session 10B.
+- `hotel_prices.py` — hotel rates via **LiteAPI**. `get_hotel_rate_pair()` returns
+  the cheapest rate and the cheapest refundable one; `find_places()` /
+  `find_hotels()` back the add-watch picker.
+- `duffel_stays.py` — **abandoned**. Duffel Stays was never enabled on the
+  account (sales-gated); hotels run on LiteAPI instead. Kept only as history.
 
 **Templates** (`templates/`) — `base.html` (layout), `login.html`, `index.html`
 (dashboard), `client.html` (public client page), `client_not_found.html`,
@@ -101,10 +106,15 @@ is one file: `static/style.css`.
 - **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric).
   Alerts fire per **stop tier**: when any of nonstop / 1-stop / 2+ hits a new low
   at/below the target (tracked against each tier's own price history), one
-  notification names every tier that improved. Has a nullable `hotel_watch_id`
-  for later.
-- **`hotel_watches`**, **`hotel_price_history`** — built for hotel monitoring
-  (not yet used by any code).
+  notification names every tier that improved — unless the watch is
+  `nonstop_only`, in which case only the Nonstop tier can alert. Rows are owned by
+  exactly one watch: `watch_id` for flights, `hotel_watch_id` for hotels, enforced
+  by a `num_nonnulls(...) = 1` check.
+- **`hotel_watches`** — one hotel watch: property, dates, guests, and
+  `target_price_per_night`.
+- **`hotel_price_history`** — one row per check, holding both the cheapest rate
+  and the cheapest **refundable** rate (`refundable_*` columns), plus any
+  taxes/fees payable at the property.
 
 Every table has Row Level Security on with an "Allow all" policy: the app
 authenticates itself with the shared password and talks to Supabase with the
@@ -121,6 +131,7 @@ All configuration is via env vars (local: `.env`; production: Render dashboard).
 | `SUPABASE_URL` | Supabase project URL (local stack: `http://127.0.0.1:54321`). |
 | `SUPABASE_ANON_KEY` | Supabase anon/public key. |
 | `DUFFEL_API_TOKEN` | Duffel API token. **Test** token locally, **live** in prod. |
+| `LITEAPI_KEY` | LiteAPI key for hotel rates. **Sandbox** locally, **production** (private key) in prod. Web needs it for the picker, cron for checking. |
 | `SENDGRID_API_KEY` | SendGrid key for sending alert emails. |
 | `SENDER_EMAIL` | The verified "from" address (also gets a copy of every alert). |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook for alerts. Optional — blank = skip. |
