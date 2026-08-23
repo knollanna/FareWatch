@@ -314,8 +314,12 @@
           {{ g.name }}
           <span class="client-group-count">· {{ g.active|length }} watch{{ 'es' if g.active|length != 1 else '' }}</span>
         </div>
+        {# SINGLE-quoted attribute on purpose. |tojson escapes < > & and ' but NOT
+           ", so inside a double-quoted attribute its own quotes close the
+           attribute early and the handler becomes `openAddForm(` — an
+           "Unexpected end of input" that silently killed this button. #}
         <button class="group-add-btn"
-                onclick="openAddForm({{ ('' if g.key == '__mine__' else g.name)|tojson }}, {{ g.email|tojson }})">
+                onclick='openAddForm({{ ("" if g.key == "__mine__" else g.name)|tojson }}, {{ g.email|tojson }})'>
           + add
         </button>
       </div>
