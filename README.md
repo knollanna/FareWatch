@@ -70,9 +70,9 @@ FareWatch is two programs that share one database — they never call each other
   `GET /api/route-stats` endpoint.
 
 **Templates** (`templates/`) — `base.html` (layout), `login.html`, `index.html`
-(dashboard), `client.html` (public client page), `client_not_found.html`,
-`usage.html`, `trends.html` (per-watch price trends), `add_watch.html`. Styling
-is one file: `static/style.css`.
+(flight dashboard), `hotels.html` (hotel dashboard), `client.html` (public client
+page), `client_not_found.html`, `usage.html`, `trends.html` (per-watch price
+trends), `add_watch.html`. Styling is one file: `static/style.css`.
 
 **One-off / utility scripts**
 - `prepare_airports.py` — downloads & filters the airport dataset into
