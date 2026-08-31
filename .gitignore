@@ -8,3 +8,8 @@ __pycache__/
 # Supabase CLI local artifacts (keep config.toml and migrations/ tracked)
 supabase/.branches
 supabase/.temp
+
+# Local session files — never committed. The repo is PUBLIC, so working notes
+# (billing, vendor evaluations, client routes) must not be committable.
+.claude/
+HANDOFF-INFLIGHT.md
