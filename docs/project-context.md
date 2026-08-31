@@ -329,6 +329,25 @@ Standing rules — each of these silently breaks authentication if changed:
     on the Nonstop tier alone, with a caveated fallback to the cheapest tier when a
     route has no direct service. See §7.
 
+27. **Stop tiers count the worst leg, not the sum (2026-08-30)** — `_worst_leg_stops`
+    in `duffel.py` (was `_total_stops`). It summed stops across slices, so a round
+    trip with **one stop each way** scored 2 and landed in the **2+ stops** tier;
+    the 1-stop tier could only ever fill when exactly one leg was nonstop. Now the
+    max across slices, which is how a traveller reads the trip and how the stored
+    `stops_outbound` / `stops_inbound` already displayed it. One-ways are
+    unaffected (single slice: max == sum).
+
+    **Consequence for alerting:** affected round trips move from the 2+ tier to the
+    1-stop tier, whose `sent_alerts.alerted_price_1_stop` baseline is usually NULL
+    for those watches. `prev is None` counts as a new low, so the first check after
+    deploy can re-alert a fare that already alerted as "2+ stops". One duplicate per
+    affected watch, then it self-corrects. Seed `alerted_price_1_stop` from each
+    watch's existing `alerted_price_2_plus_stops` minimum first if that matters.
+
+    **Historical `price_history` rows keep the old bucketing** and are not
+    backfilled, so tier charts spanning the change show a discontinuity: the 2+
+    series drops and the 1-stop series appears.
+
 ---
 
 ## 7. Key decisions & gotchas
