@@ -94,7 +94,8 @@ storage-terms gotchas), §8 (runbook), **§9 (go-live checklist)**.
 - `supabase start` (needs Docker). If `anon` "permission denied for table …", apply
   the local GRANT fix in §7. If the postgres image pull is broken, see the §7 image-pin note.
 - `.env` holds the LiteAPI **sandbox** key → fixed test hotels (Oslo `lp1d641` etc.).
-- Web: run the dev server (`flask --app app run` / preview), log in with password `REDACTED`.
+- Web: run the dev server (`flask --app app run` / preview), log in with `APP_PASSWORD`
+  from your local `.env`.
 - Exercise `/hotels`: click **+ add hotel watch** → city "Oslo", country "NO" →
   search → pick a hotel → fill dates/target → add.
 - Hotel checks only (skip flights/Duffel), no real emails:
