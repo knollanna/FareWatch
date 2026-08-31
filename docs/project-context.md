@@ -168,7 +168,7 @@ services), matching the local `.venv`.
 `SENDGRID_API_KEY`, `SENDER_EMAIL`, `SLACK_WEBHOOK_URL`, `BASE_URL`,
 `APP_PASSWORD`, `FLASK_SECRET_KEY`, `RENDER_API_KEY` (optional). All declared in
 `render.yaml` (`sync: false` secrets set in the Render dashboard). App password is
-currently `REDACTED`.
+kept in the password manager, not here — see the Render dashboard for the live value.
 
 **Email deliverability — DNS and SendGrid settings that must not drift
 (set up 2026-08-22).** A client on Yahoo never received a fare alert. SendGrid's
