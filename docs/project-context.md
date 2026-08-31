@@ -695,3 +695,17 @@ this is worth settling before much more accrues. §7 has the wording to send.
   epoch for hotels until there is one).
 - **Duffel Stays** — abandoned as the hotel path (sales never responded); LiteAPI
   replaced it. Kept here only as history.
+- **Sabre — rejected as the Delta/United coverage fallback (2026-08-30).** Not a
+  terms violation, a structural gate: the public Sabre Dev Studio terms cover
+  sandbox/certification only, "not in a production environment." Production
+  access is a negotiated commercial contract, and the application itself asks
+  for an IATA/ARC number and annual booking volume — issued to an accredited
+  agency, not an individual. Anna books under Fora Travel's host-agency
+  accreditation, so a Sabre production contract would go to Fora, not to her;
+  using it for FareWatch means asking Fora to extend their GDS relationship to
+  a personal tool, not a signup she can do herself. Separately, GDS contracts
+  commit the agency to a booking-volume target with financial penalties
+  (debit memos) for missing it, and the industry actively polices
+  look-to-book ratio — a tool built to search constantly and book rarely is a
+  bad commercial fit even where access exists. Do not re-litigate this from
+  scratch; ask Fora directly before restarting.
