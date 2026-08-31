@@ -556,6 +556,36 @@ input, select { font-family: var(--font-sans); }
 .form-field select:focus { border-color: var(--accent); }
 .form-field input[type="text"] { text-transform: uppercase; }
 
+/* A checkbox is not a text input. The width:100%/padding/border above turn it
+   into a full-width box: Chrome centres the tick inside that box, and the label
+   text wraps underneath it. Reset the control and lay the row out inline. The
+   min-height matches an input's (9+9 padding + ~17 line + 1 border) so the row
+   bottom-aligns with the field beside it under align-self:end. */
+.form-field label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.form-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  accent-color: var(--accent);
+}
+/* The dashboard's only focus styling is a border-colour swap on text inputs,
+   which a 16px checkbox cannot show. Give it a real ring. */
+.form-field input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .trip-toggle {
   display: flex;
   gap: 0;
