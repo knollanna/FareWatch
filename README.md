@@ -52,8 +52,10 @@ FareWatch is two programs that share one database — they never call each other
   alerts. The "automation" of FareWatch.
 - `duffel.py` — flights integration. `get_lowest_fare(...)` searches Duffel and
   returns the cheapest fare + flight details, plus the cheapest price at each
-  stop level (nonstop / 1-stop / 2+). Handles rate limits by honouring Duffel's
-  `ratelimit-reset` Unix-timestamp header with up to 6 retries.
+  stop level (nonstop / 1-stop / 2+). A round trip is tiered by its **worst leg**
+  (`_worst_leg_stops`), so one stop each way is a 1-stop trip, not a 2-stop one.
+  Handles rate limits by honouring Duffel's `ratelimit-reset` Unix-timestamp
+  header with up to 6 retries.
 - `alerts.py` — notifications: client fare-drop email (SendGrid), Slack message
   (webhook), and internal error email. Currency is passed through from Duffel
   (not assumed to be USD).
@@ -98,7 +100,10 @@ is one file: `static/style.css`.
   numbers, departure/return times, stops, connections). Also records the
   cheapest fare at each **stop level** that check (`price_nonstop`,
   `price_1_stop`, `price_2_plus_stops`) — so a nonstop priced just above the
-  cheapest connecting fare is no longer thrown away — plus `stop_tier_details`
+  cheapest connecting fare is no longer thrown away. **Rows written before
+  2026-08-30 tiered round trips by summed stops**, so a 1-stop-each-way fare sits
+  under `price_2_plus_stops` in older history; charts spanning that date show the
+  2+ series drop and the 1-stop series appear. Also stores `stop_tier_details`
   (JSON, per-tier flight details for the expandable fare-options table) and
   `date_prices` (JSON: cheapest fare per departure date in the window, for the
   "cheapest day to fly" trend). This is the dataset behind the price charts, the
