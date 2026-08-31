@@ -71,7 +71,9 @@ heads-up email so nothing fails silently.
 - Real airline fares via Duffel, checked every 2 hours, 24/7.
 - Captures the winning flight's airline, flight numbers, departure/return times,
   and number of stops with connecting airports.
-- Records the cheapest fare at each **stop level** (nonstop / 1-stop / 2+) and
+- Records the cheapest fare at each **stop level** (nonstop / 1-stop / 2+),
+  counting a round trip by its **worst leg** — one stop each way is a 1-stop
+  trip, which is how a traveller reads it — and
   shows them on each card as an **expandable fare-options table**: per-person
   prices side by side, and each row opens to reveal that fare's airline, flight
   number(s), dates, and connections (both legs for round-trips). A nonstop a few

@@ -578,6 +578,14 @@ Standing rules — each of these silently breaks authentication if changed:
 - **Chart.js** must be a CDN version that exists — cdnjs pruned `4.4.3` (404),
   blanking all charts; currently `4.5.0`. Charts must build after layout
   (DOMContentLoaded) or render 0-size.
+- **`.form-field input` sets `width: 100%` — checkboxes need the reset (2026-08-30).**
+  The rule that keeps text inputs from spilling out of a narrow card (`cd80cc3`)
+  matches every input, including checkboxes. A stretched checkbox fills the line,
+  Chrome centres the tick inside it, and the label text wraps underneath — which is
+  how `nonstop only` rendered until it was fixed. `static/style.css` now resets
+  `input[type="checkbox"]` to 16×16 and lays the label out as a flex row. **Any new
+  checkbox or radio inside `.form-field` inherits the same trap**, and the dashboard
+  has no focus ring outside `.client-theme`, so a new control needs one adding.
 - **Booking:** FareWatch only *searches*; Anna books manually on Duffel (no
   pre-fillable Duffel search URL exists — we show route/date/flight to copy).
 - **Storage:** ~1 MB used of 500 MB free; per-date capture adds ~15%/row. Years
