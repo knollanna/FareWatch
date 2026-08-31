@@ -64,8 +64,10 @@ FareWatch is two programs that share one database — they never call each other
 - `hotel_prices.py` — hotel rates via **LiteAPI**. `get_hotel_rate_pair()` returns
   the cheapest rate and the cheapest refundable one; `find_places()` /
   `find_hotels()` back the add-watch picker.
-- `duffel_stays.py` — **abandoned**. Duffel Stays was never enabled on the
-  account (sales-gated); hotels run on LiteAPI instead. Kept only as history.
+- `route_stats.py` — aggregates `price_history` across all watches on a route
+  (active and archived) so the add-watch form can show historical lowest /
+  median / latest price before a target is set. Backs the login-gated
+  `GET /api/route-stats` endpoint.
 
 **Templates** (`templates/`) — `base.html` (layout), `login.html`, `index.html`
 (dashboard), `client.html` (public client page), `client_not_found.html`,

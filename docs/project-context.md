@@ -59,7 +59,7 @@ External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
 - `alerts.py` — email (SendGrid) + Slack (Block Kit) + error emails, for flights
   **and** hotels (`send_hotel_alert` / `send_hotel_slack_alert` / `send_hotel_error_alert`).
 - `usage.py` — `/usage` page (SendGrid/Duffel/Supabase/Render metrics).
-- `duffel_stays.py` — **abandoned** (Duffel Stays sales-gated; hotels use LiteAPI instead).
+- `route_stats.py` — route price-history aggregation for the add-watch form (§21).
 - Templates: `base.html`, `index.html` (flight dashboard), `hotels.html` (hotel
   dashboard), `client.html`, `usage.html`, `trends.html`, `add_watch.html`,
   `login.html`, `client_not_found.html`. One stylesheet: `static/style.css`.
