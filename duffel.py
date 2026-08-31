@@ -144,13 +144,21 @@ def _extract_flight_details(offer):
         return None
 
 
-def _total_stops(offer):
-    """Total stops across the whole itinerary (sum of stops on every slice).
+def _worst_leg_stops(offer):
+    """Stops on the worst leg of the itinerary — the MAX across slices, not the sum.
 
-    For a one-way that's just the outbound stops; for a round-trip it's outbound
-    + inbound. Used to bucket offers into stop tiers (0 / 1 / 2+).
+    A round trip with one stop each way is a "1 stop" trip. That is how a
+    traveller describes it, how the tier labels read, and how the stored
+    stops_outbound / stops_inbound already display it.
+
+    Summing instead (the original behaviour) put every such round trip in the 2+
+    bucket, so the 1-stop tier only ever filled when exactly one leg happened to
+    be nonstop. One-ways are unaffected: with a single slice, max == sum.
     """
-    return sum(max(len(s.get("segments", [])) - 1, 0) for s in offer.get("slices", []))
+    return max(
+        (max(len(s.get("segments", [])) - 1, 0) for s in offer.get("slices", [])),
+        default=0,
+    )
 
 
 def get_lowest_fare(origin, destination, date_from, date_to, passengers,
@@ -330,7 +338,7 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
                 amt = float(o["total_amount"])
             except (KeyError, ValueError, TypeError):
                 continue
-            bucket = min(_total_stops(o), 2)
+            bucket = min(_worst_leg_stops(o), 2)
             if bucket not in tiers or amt < tiers[bucket]["price"]:
                 tiers[bucket] = {"price": amt, "offer": o}
 
