@@ -694,22 +694,31 @@ Standing rules — each of these silently breaks authentication if changed:
   adults departing {date} returning {date}"`; add `returning` only when there
   actually is one, or a one-way search becomes a phantom round trip too.
   `alerts.py::_google_flights_url` does this now.
-- **⚠️ OPEN — LiteAPI round-trip journeys never surface a return leg
-  (found 2026-09-07, not yet fixed).** The first real LiteAPI-sourced round-trip
-  alert (JFK↔CUN, out Dec 23 / back Dec 31) stored `returning_at: null` and
-  `stops_inbound: null` on **every** tier in `stop_tier_details`, despite the
-  watch being genuine round-trip and the request correctly sending both legs.
-  `flight_prices.py`'s round-trip parsing (`_direction_segments(journey,
-  "INBOUND")`) was written by extrapolating from the one-way contract that
-  *was* verified against real data 2026-09-01 — the round-trip shape was never
-  actually checked against a live 2-leg response before shipping. Either
-  LiteAPI doesn't tag return-direction segments as `"INBOUND"` the way assumed,
-  or doesn't bundle both directions into one journey at all. `diagnose_liteapi_
-  roundtrip.py` (repo root, one-off, delete after use) dumps the raw response
-  for this exact route/dates so the real segment shape can be read instead of
-  guessed at again. **Do not trust any LiteAPI-sourced round-trip return date
-  until this is fixed** — Duffel-sourced tiers are unaffected (Duffel bundles
-  both slices in one `offer` and that path is unchanged).
+- **LiteAPI round-trip requests need `"direction"` on every leg, or the
+  return leg silently vanishes (found and fixed 2026-09-07).** The first real
+  LiteAPI-sourced round-trip alert (JFK↔CUN, out Dec 23 / back Dec 31) stored
+  `returning_at: null` and `stops_inbound: null` on every tier in
+  `stop_tier_details`, despite the request sending both legs. Diagnosed by
+  dumping the raw response for that exact route/dates: every journey came back
+  shaped `('OUTBOUND',)` only — confirmed it wasn't an artifact by requesting
+  the return leg *alone*, which also came back tagged `OUTBOUND` (the field
+  means "the leg this call searched," not "outbound relative to a round
+  trip"). Root cause, found once Anna supplied LiteAPI's own documented
+  request example: each `legs[]` entry needs an explicit `"direction":
+  "OUTBOUND"`/`"INBOUND"` field (plus `children`/`infants`/`country`/`sort`,
+  which the original request never sent either) — without it, a 2-leg request
+  silently degrades to outbound-only with no error. Adding `direction` to both
+  legs (`flight_prices.py::_search_single_date`) fixed it: verified live,
+  `returning_at`/`return_flight_number`/`stops_inbound` all populate correctly
+  now, both legs can carry different airlines/stop counts. **A tempting wrong
+  fix was tried first** — two separate one-way calls combined client-side,
+  reasoning LiteAPI didn't support combined round-trip search at all — and
+  would have shipped a second bug: LiteAPI prices a round trip as one bundled
+  fare, not necessarily two one-ways summed, so that approach could have
+  quoted a wrong total. Reverted once the real request shape surfaced. Second,
+  related finding: round-trip (2-leg) calls take noticeably longer than
+  one-way — the original 30s timeout wasn't enough (confirmed timing out live)
+  and is now 60s (`flight_prices.py`, same call site).
 
 ---
 
@@ -755,9 +764,10 @@ rate alerted on and the cheapest overall shown as context (§7).
 
 **Flights on LiteAPI too, live since 2026-09-07** (§6): every watch queries
 both Duffel and LiteAPI, cheaper wins per tier — real coverage gain confirmed
-for United and Delta. **Known-broken for round trips right now** (§7): a
-LiteAPI-sourced tier never reports a return date. One-way watches and
-Duffel-sourced tiers are unaffected.
+for United and Delta. A same-day round-trip bug (missing `"direction"` on
+each requested leg, silently dropping the return leg) was found and fixed the
+same day (§7) — verified live, round-trip results now carry a real return
+date.
 
 The price-history **chart is admin-only** — deliberately, per the LiteAPI storage
 terms in §7; the client page shows a "lowest observed" card with the live-rates
@@ -779,12 +789,6 @@ this is worth settling before much more accrues. §7 has the wording to send.
 
 ### Pending / next
 
-- **LiteAPI round-trip return dates (§7) — highest priority, actively being
-  diagnosed.** Every LiteAPI-sourced tier on a round-trip watch is missing its
-  return leg entirely. Fixing this correctly needs the raw response shape
-  (`diagnose_liteapi_roundtrip.py`) before touching `_extract_flight_details`
-  again — the one-way path was verified against real data before shipping;
-  this one wasn't, and guessing twice isn't the move.
 - **The LiteAPI flights billing question, same as hotels' (§1/§2 of
   HANDOFF-INFLIGHT.md, local/gitignored).** Went live 2026-09-07 without an
   answer — deliberate, but worth an eye on actual charges.

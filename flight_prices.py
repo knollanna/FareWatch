@@ -7,13 +7,6 @@ HANDOFF-INFLIGHT.md). Alaska and Frontier turned out to already be on Duffel;
 JetBlue and Southwest are absent from LiteAPI too, so this file doesn't try to
 solve those.
 
-⚠️ NOT WIRED INTO check_prices.py YET. LiteAPI's flights billing question is
-still open — 2-hourly scheduled polling is billable by default past a
-1,500:1 search-to-booking ratio, same shape as Duffel's own unresolved
-mechanism (docs/project-context.md §9 / HANDOFF-INFLIGHT.md §1). Call
-get_lowest_fare_liteapi directly, or via this file's __main__ smoke test,
-until that's answered. Wiring into the cron is a separate, deliberate step.
-
 ⚠️ SANDBOX TRAP: environment is determined by which key you use, not the URL
 — sandbox and production hit the same https://api.liteapi.travel/v3.0. The
 sandbox key silently returns a fake carrier ("Nuitee Air") and logo URLs
@@ -23,17 +16,31 @@ Local .env holds the SANDBOX key on purpose, same pattern as hotel_prices.py
 refuses to return a result from a sandbox payload rather than risk trusting
 it silently, since that's exactly what cost real time earlier this session.
 
-Contract (from real production responses, verified 2026-09-01):
+Contract (from real production responses, verified 2026-09-01 one-way,
+corrected 2026-09-07 for round-trip):
   * Base:  https://api.liteapi.travel/v3.0
   * Auth:  X-API-Key header.
-  * Rates: POST /flights/rates — body: legs[] (one entry per direction:
-           origin, destination, date), adults, currency.
+  * Rates: POST /flights/rates — body: legs[] (origin, destination, date,
+           **direction** — "OUTBOUND"/"INBOUND", required per leg), adults,
+           children, infants, currency, country, sort.
+    ⚠️ CORRECTED 2026-09-07: the original request never sent "direction" on
+    each leg (or children/infants/country/sort). Without it, a 2-leg request
+    silently came back as if only the FIRST leg had been searched — every
+    journey one-way, the return leg dropped with no error — which is why
+    every LiteAPI-sourced round-trip result in production had no return date.
+    Confirmed by testing the return leg alone (also came back "OUTBOUND" —
+    the field just means "the leg this call searched", not "outbound
+    relative to a round trip") and then by testing again with "direction" set
+    on both legs, which correctly returned journeys bundling both.
   * Response: data[0].journeys[], each a distinct itinerary —
       .segments[]  — actual flight legs, each with .carrier
                      (marketingCode/marketingName), .direction
                      (OUTBOUND/INBOUND), .flight.marketingNumber
       .cheapestOffer.pricing.display.{total,currency} — this itinerary's
-                     cheapest fare
+                     cheapest fare (a bundled round-trip fare, not
+                     necessarily two one-ways added together — same reason
+                     duffel.py has to search every date pair rather than
+                     pricing each direction independently)
       .offers[]    — every fare/bundle option for the itinerary (cheapestOffer
                      is the min of these)
     Stops = segments in one direction, minus 1 — mirrors duffel.py's slice
@@ -190,17 +197,37 @@ def _search_single_date(origin, destination, departure_date, passengers, return_
     if not LITEAPI_KEY:
         return None, None, None, "LITEAPI_KEY is not set", None
 
-    legs = [{"origin": origin, "destination": destination, "date": departure_date}]
+    legs = [{"origin": origin, "destination": destination, "date": departure_date,
+             "direction": "OUTBOUND"}]
     if return_date:
-        legs.append({"origin": destination, "destination": origin, "date": return_date})
+        legs.append({"origin": destination, "destination": origin, "date": return_date,
+                     "direction": "INBOUND"})
 
-    body = {"legs": legs, "adults": passengers, "currency": "USD"}
+    # children/infants/country/sort match LiteAPI's own documented request
+    # shape. "direction" per leg is the field that actually matters — without
+    # it a round-trip request silently degrades to outbound-only (see module
+    # docstring) — the rest are included because they're part of the same
+    # confirmed-working shape and there's no reason to diverge from it.
+    body = {
+        "legs": legs,
+        "adults": passengers,
+        "children": 0,
+        "infants": 0,
+        "currency": "USD",
+        "country": "US",
+        "sort": {"sortBy": "price", "sortOrder": "asc"},
+    }
 
     max_retries = 5
     for attempt in range(max_retries + 1):
         try:
+            # A round-trip (2-leg) search takes noticeably longer than a
+            # one-way one — confirmed live 2026-09-07: one-way calls return in
+            # a few seconds, round-trip calls timed out at 30s and needed up
+            # to 90s. 60s splits the difference; bump further if it keeps
+            # timing out rather than assume it was a one-off.
             resp = requests.post(f"{LITEAPI_BASE}/flights/rates", headers=_headers(),
-                                  json=body, timeout=30)
+                                  json=body, timeout=60)
         except requests.exceptions.Timeout:
             return None, None, None, "LiteAPI request timed out", None
         except requests.exceptions.RequestException as e:
@@ -261,8 +288,7 @@ def get_lowest_fare_liteapi(origin, destination, date_from, date_to, passengers,
     """
     LiteAPI counterpart to duffel.get_lowest_fare — same signature, same
     return contract: (price, currency, flight_details, error, stop_tiers,
-    date_prices). NOT wired into check_prices.py yet (see module docstring);
-    call directly or via this file's __main__ smoke test.
+    date_prices).
     """
     empty_tiers = {
         "price_nonstop": None, "price_1_stop": None, "price_2_plus_stops": None,
@@ -357,13 +383,18 @@ if __name__ == "__main__":
     # (not the sandbox key that lives in local .env) before running:
     #   LITEAPI_KEY=<prod key> python flight_prices.py
     # A sandbox response is refused rather than trusted (_is_sandbox_response).
+    # Covers BOTH one-way and round-trip — the round-trip path shipped once
+    # without ever being exercised against real data, which is exactly how the
+    # 2026-09-07 bug (missing "direction" per leg, silently dropping the
+    # return leg) got through. Don't repeat that: always test both here before
+    # touching this file again.
     if not LITEAPI_KEY:
         print("Set LITEAPI_KEY to your PRODUCTION key to run this smoke test.")
         print("(Local .env's key is the sandbox key on purpose.)")
         raise SystemExit(0)
 
     test_date = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
-    print(f"→ get_lowest_fare_liteapi(EWR, ORD, {test_date}, 1 pax) — Duffel gap, UA-heavy")
+    print(f"→ ONE-WAY: get_lowest_fare_liteapi(EWR, ORD, {test_date}, 1 pax) — Duffel gap, UA-heavy")
     price, currency, details, err, tiers, date_prices = get_lowest_fare_liteapi(
         "EWR", "ORD", test_date, test_date, 1)
     print("  error:", err)
@@ -371,3 +402,17 @@ if __name__ == "__main__":
     print("  details:", json.dumps(details, indent=2))
     print("  stop_tiers:", json.dumps(
         {k: v for k, v in tiers.items() if k != "details"}, indent=2))
+
+    return_date = (datetime.date.today() + datetime.timedelta(days=21)).isoformat()
+    print(f"\n→ ROUND-TRIP: get_lowest_fare_liteapi(EWR, ORD, {test_date}, out; "
+          f"{return_date} back, 1 pax)")
+    price, currency, details, err, tiers, date_prices = get_lowest_fare_liteapi(
+        "EWR", "ORD", test_date, test_date, 1,
+        trip_type="round_trip", return_date_from=return_date, return_date_to=return_date)
+    print("  error:", err)
+    print("  price:", price, currency)
+    print("  details:", json.dumps(details, indent=2))
+    if not err:
+        assert details and details.get("returning_at"), \
+            "Round-trip result has no return date — the bug is back."
+        print("  ✓ returning_at is populated")
