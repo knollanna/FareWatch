@@ -12,9 +12,10 @@
 
 A flight-fare monitoring tool for **Anna Knoll, an independent travel advisor
 (Fora Travel)**. She sets up **watches** on routes/dates for clients; FareWatch
-checks Duffel every 2 hours, records prices, and emails + Slacks her (and the
-client) when a fare hits target. Each client gets a private link to a live
-status page. Deployed at **farewatch.annaknoll.com**.
+checks **Duffel and LiteAPI** every 2 hours (both queried, cheaper wins — see
+§6), records prices, and emails + Slacks her (and the client) when a fare
+hits target. Each client gets a private link to a live status page. Deployed at
+**farewatch.annaknoll.com**.
 
 **Hotels** work too — same idea (watch a specific hotel + dates, alert when the
 nightly rate drops under target), built on **LiteAPI** after Duffel Stays turned
@@ -32,11 +33,11 @@ Two programs sharing one database — they never call each other:
 | Part | Files | Runs | Job |
 |---|---|---|---|
 | **Web app** | `app.py` + `templates/` | always-on (gunicorn on Render) | admin dashboard + public client pages |
-| **Price checker** | `check_prices.py` | Render cron, **every 2h, 24/7** (`0 */2 * * *`) | check flights (Duffel) **then** hotels (LiteAPI), store prices, send alerts |
+| **Price checker** | `check_prices.py` | Render cron, **every 2h, 24/7** (`0 */2 * * *`) | check flights (**Duffel + LiteAPI, merged** — `flight_merge.py`) **then** hotels (LiteAPI), store prices, send alerts |
 
-External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
-**SendGrid** (email), **Slack** (webhook), **Supabase/Postgres** (DB), **Render**
-(hosting).
+External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (flight fares
+**and** hotel rates — same account, both enabled on one key), **SendGrid**
+(email), **Slack** (webhook), **Supabase/Postgres** (DB), **Render** (hosting).
 
 ---
 
@@ -49,6 +50,14 @@ External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
   `price_history` / `hotel_price_history`, fires alerts (swallow-safe).
 - `duffel.py` — flights. `get_lowest_fare(...)` returns `(price, currency,
   flight_details, error, stop_tiers, date_prices)`. Handles rate limits.
+- `flight_prices.py` — flights via **LiteAPI**, the same search shape as
+  `duffel.py`. `get_lowest_fare_liteapi(...)` returns the identical 6-tuple, so
+  the two are drop-in comparable. Guards against LiteAPI's sandbox silently
+  answering behind the production key (`_is_sandbox_response` — environment is
+  decided by which key is used, not the endpoint, same trap as the hotels side).
+- `flight_merge.py` — combines a Duffel result and a LiteAPI result: every
+  watch queries both each check, cheaper wins per stop tier, tagged with
+  `source`. Only compares numerically when currencies match.
 - `hotel_prices.py` — hotels (LiteAPI). Public surface:
   `get_hotel_rate_pair(hotel_id, dates, guests)` → `{"cheapest", "refundable"}`,
   what the cron calls (two API calls, or one when the cheapest is already
@@ -58,6 +67,8 @@ External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (hotel rates),
   LiteAPI hotel IDs. **No `rooms` parameter** — multi-room was retired (§7).
 - `alerts.py` — email (SendGrid) + Slack (Block Kit) + error emails, for flights
   **and** hotels (`send_hotel_alert` / `send_hotel_slack_alert` / `send_hotel_error_alert`).
+  `_google_flights_url` builds the flight link from the winning tier's own
+  dates and passenger count — see §7 for why a single date isn't enough.
 - `usage.py` — `/usage` page (SendGrid/Duffel/Supabase/Render metrics).
 - `route_stats.py` — route price-history aggregation for the add-watch form (§21).
 - Templates: `base.html`, `index.html` (flight dashboard), `hotels.html` (hotel
@@ -84,7 +95,12 @@ shared password + anon key).
   `departing_at`, `returning_at`, `return_flight_number`, `stops_outbound`,
   `stops_inbound`, `connection_airports`), per-tier prices (`price_nonstop`,
   `price_1_stop`, `price_2_plus_stops`), `stop_tier_details` (JSONB: per-tier
-  flight details), `date_prices` (JSONB: cheapest fare per departure date).
+  flight details), `date_prices` (JSONB: cheapest fare per departure date),
+  `source` (added 2026-09-07: `duffel` or `liteapi`, whichever won the overall
+  price that check; defaults to `duffel` on rows from before the migration).
+  Each tier's own winning source lives inside `stop_tier_details` instead of
+  more columns — a nonstop and a 1-stop can come from different providers on
+  the same check.
 - **`sent_alerts`** — log of alerts (`watch_id`, `price`, `sent_at`,
   `hotel_watch_id`, plus `alerted_price_nonstop` / `alerted_price_1_stop` /
   `alerted_price_2_plus_stops`). The per-tier `alerted_price_*` columns record
@@ -122,8 +138,13 @@ shared password + anon key).
 
 This split exists because local + prod once shared one DB and a local
 `check_prices.py` run with the test token polluted production with fake "Duffel
-Airways" fares. Same rule for hotels: keep the LiteAPI **sandbox** key local so
-sandbox test-hotel rates never land in prod `hotel_price_history`. Now isolated.
+Airways" fares. Same rule for hotels and now flights: keep the LiteAPI
+**sandbox** key local so sandbox data never lands in prod `hotel_price_history`
+or `price_history`. Now isolated. Production flight access was granted on the
+**same** LiteAPI key already used for hotels (2026-08-31) — one key, no new
+credential — but the local sandbox key still answers for flights the same way
+it always has for hotels: silently, with no error, which is why
+`flight_prices.py` checks for it explicitly rather than trusting the response.
 
 **Schema changes go through migrations** (never hand-edit the dashboard):
 ```
@@ -164,7 +185,8 @@ Python is pinned to **3.14.5** via `PYTHON_VERSION` in `render.yaml` (both
 services), matching the local `.venv`.
 
 **Env vars:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DUFFEL_API_TOKEN`,
-`LITEAPI_KEY` (hotels — web needs it for the picker, cron for checking),
+`LITEAPI_KEY` (hotels **and flights**, same key — web needs it for the hotel
+picker, cron for checking both),
 `SENDGRID_API_KEY`, `SENDER_EMAIL`, `SLACK_WEBHOOK_URL`, `BASE_URL`,
 `APP_PASSWORD`, `FLASK_SECRET_KEY`, `RENDER_API_KEY` (optional). All declared in
 `render.yaml` (`sync: false` secrets set in the Render dashboard). App password is
@@ -347,6 +369,58 @@ Standing rules — each of these silently breaks authentication if changed:
     **Historical `price_history` rows keep the old bucketing** and are not
     backfilled, so tier charts spanning the change show a discontinuity: the 2+
     series drops and the 1-stop series appears.
+
+28. **LiteAPI flights wired into the cron (2026-09-07).** Production
+    `price_history` showed American as the only US carrier across 7,747 checks
+    (Delta/United/JetBlue/Southwest/Alaska/Spirit/Frontier: zero) — investigated
+    and found to be real: Duffel genuinely doesn't return United or Delta even
+    on fresh, direct tests against their own fortress-hub routes (EWR↔ORD,
+    JFK↔ATL). Sabre and Travelport were both ruled out as fixes — accreditation-
+    gated, not a terms issue (§9). LiteAPI, already integrated for hotels, turned
+    out to carry United/Delta content via GDS; production flight access was
+    granted on the **same key** already used for hotels (2026-08-31), so no new
+    credential was needed. Built:
+    - `flight_prices.py` — LiteAPI counterpart to `duffel.py`, identical return
+      shape.
+    - `flight_merge.py` — every watch now queries **both** providers each check
+      (not fallback-only — a deliberate call, since LiteAPI's value turned out
+      to include simply being cheaper sometimes, not just covering an absence)
+      and keeps the cheaper price per stop tier, tagged `source`.
+    - `price_history.source` migration, pushed to prod before the code (same
+      migration-first discipline as §5).
+    - Admin dashboard: a small "via Duffel"/"via LiteAPI" label per tier.
+    - The "book on Duffel" CTA is suppressed when the winning fare came from
+      LiteAPI — that flight isn't in Duffel's own bookable inventory, so the
+      button would send Anna to search for something that isn't there. Replaced
+      with a "search {airline} directly" note.
+
+    Alaska and Frontier — also suspected gaps from the same zero-count data —
+    turned out to already be on Duffel; the zero was "never won on price," not
+    "absent," a distinction the historical count couldn't tell apart (raw
+    per-carrier presence was never recorded, only the single cheapest carrier
+    per check). JetBlue is absent from both providers — not fixed by this
+    change. Southwest is unavailable everywhere pending its own NDC rollout.
+    **Went live before LiteAPI answered the flights billing question** (same
+    1,500-search-free-then-metered shape as Duffel's own unconfirmed billing,
+    §9) — a deliberate risk-accepted call, not an oversight.
+
+29. **Google Flights link used the wrong dates (caught 2026-09-07, same day as
+    #28).** An alert for a fare departing Dec 24 linked to a Google Flights
+    search for Dec 23–27. `_google_flights_url` built its `q=` free-text query
+    from only one date (`watch["date_from"]`, the departure-window start) and
+    never the winning fare's actual date or a return date at all; confirmed
+    against the live Google Flights parser that giving it a single date makes
+    it silently invent a return **~4 days later** rather than searching one-way
+    — the "27" was Google's guess, not anything FareWatch computed. The link
+    also always searched for **1 adult** regardless of party size, so a
+    5-passenger alert's link priced a solo traveller. Fixed by building the
+    query from the winning tier's own `departing_at`/`returning_at` and the
+    watch's real passenger count, phrased `"{origin} to {destination} for N
+    adults departing X returning Y"` — verified against the live parser to
+    populate both dates and the passenger count correctly; omitting `returning`
+    correctly searches one-way. Not new to the LiteAPI merge — the bug predates
+    it and would have misfired on Duffel-only alerts too — but it surfaced
+    because #28 put a real client alert in front of Anna the same day.
 
 ---
 
@@ -611,6 +685,31 @@ Standing rules — each of these silently breaks authentication if changed:
   ON SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL TABLES IN
   SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL SEQUENCES IN
   SCHEMA public TO anon, authenticated, service_role;"`. Not needed in prod.
+- **Google Flights' `/travel/flights?q=` free-text parser needs both dates
+  spelled out, or it invents one (2026-09-07).** Give it a single date and it
+  silently assumes round trip and picks a return **~4 days later** with no
+  error or signal that it guessed — confirmed against the live parser, not
+  documented anywhere by Google. The phrasing that reliably works (it's what
+  Google's own "Track prices" blurb uses): `"{origin} to {destination} for N
+  adults departing {date} returning {date}"`; add `returning` only when there
+  actually is one, or a one-way search becomes a phantom round trip too.
+  `alerts.py::_google_flights_url` does this now.
+- **⚠️ OPEN — LiteAPI round-trip journeys never surface a return leg
+  (found 2026-09-07, not yet fixed).** The first real LiteAPI-sourced round-trip
+  alert (JFK↔CUN, out Dec 23 / back Dec 31) stored `returning_at: null` and
+  `stops_inbound: null` on **every** tier in `stop_tier_details`, despite the
+  watch being genuine round-trip and the request correctly sending both legs.
+  `flight_prices.py`'s round-trip parsing (`_direction_segments(journey,
+  "INBOUND")`) was written by extrapolating from the one-way contract that
+  *was* verified against real data 2026-09-01 — the round-trip shape was never
+  actually checked against a live 2-leg response before shipping. Either
+  LiteAPI doesn't tag return-direction segments as `"INBOUND"` the way assumed,
+  or doesn't bundle both directions into one journey at all. `diagnose_liteapi_
+  roundtrip.py` (repo root, one-off, delete after use) dumps the raw response
+  for this exact route/dates so the real segment shape can be read instead of
+  guessed at again. **Do not trust any LiteAPI-sourced round-trip return date
+  until this is fixed** — Duffel-sourced tiers are unaffected (Duffel bundles
+  both slices in one `offer` and that path is unchanged).
 
 ---
 
@@ -654,6 +753,12 @@ add-watch form, and **nonstop-only watches**. **Hotels (LiteAPI), live since
 and client-facing cards. Tracked **per night**, with the cheapest **refundable**
 rate alerted on and the cheapest overall shown as context (§7).
 
+**Flights on LiteAPI too, live since 2026-09-07** (§6): every watch queries
+both Duffel and LiteAPI, cheaper wins per tier — real coverage gain confirmed
+for United and Delta. **Known-broken for round trips right now** (§7): a
+LiteAPI-sourced tier never reports a return date. One-way watches and
+Duffel-sourced tiers are unaffected.
+
 The price-history **chart is admin-only** — deliberately, per the LiteAPI storage
 terms in §7; the client page shows a "lowest observed" card with the live-rates
 caveat and no chart.
@@ -674,6 +779,15 @@ this is worth settling before much more accrues. §7 has the wording to send.
 
 ### Pending / next
 
+- **LiteAPI round-trip return dates (§7) — highest priority, actively being
+  diagnosed.** Every LiteAPI-sourced tier on a round-trip watch is missing its
+  return leg entirely. Fixing this correctly needs the raw response shape
+  (`diagnose_liteapi_roundtrip.py`) before touching `_extract_flight_details`
+  again — the one-way path was verified against real data before shipping;
+  this one wasn't, and guessing twice isn't the move.
+- **The LiteAPI flights billing question, same as hotels' (§1/§2 of
+  HANDOFF-INFLIGHT.md, local/gitignored).** Went live 2026-09-07 without an
+  answer — deliberate, but worth an eye on actual charges.
 - **`/usage` doesn't count the hotel tables.** `get_supabase_usage()` counts
   `watches` / `price_history` / `sent_alerts` only, so the 500 MB storage gauge —
   the thing that decides when downsampling becomes real — understates.

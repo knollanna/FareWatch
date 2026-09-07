@@ -68,7 +68,9 @@ heads-up email so nothing fails silently.
 - One-way and round-trip watches, each with flexible date windows.
 - Per-person target pricing (entered per person, compared correctly for the
   whole party).
-- Real airline fares via Duffel, checked every 2 hours, 24/7.
+- Real airline fares via **Duffel and LiteAPI**, checked every 2 hours, 24/7 —
+  both queried on every check, cheaper wins. Duffel alone misses United and
+  Delta even on their own busiest routes; LiteAPI covers that gap.
 - Captures the winning flight's airline, flight numbers, departure/return times,
   and number of stops with connecting airports.
 - Records the cheapest fare at each **stop level** (nonstop / 1-stop / 2+),
@@ -139,6 +141,12 @@ get alerted when the nightly rate drops under target. Rates are tracked per nigh
 rather than per person, the cheapest **refundable** rate is the one that triggers
 an alert, and any taxes or fees payable at the property are shown alongside so the
 number a client sees is the number they pay.
+
+**LiteAPI covers flights too now** (since September 2026) — the same provider
+behind hotels turned out to carry United and Delta fares that Duffel doesn't
+return even on those airlines' own busiest routes. Every flight watch now checks
+both providers each time and keeps whichever is cheaper, so coverage grew
+without giving up Duffel's existing content.
 
 **Ideas for later:** a "cheapest day to fly over time" view (now that per-date
 prices are being captured), automatic closing of past-date watches, and a more

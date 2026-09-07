@@ -1,15 +1,21 @@
 # FareWatch
 
 A flight-fare monitoring tool for a travel advisor. You set up **watches** on
-specific routes/dates for clients, and FareWatch checks Duffel every couple of
-hours, records the price, and emails + Slacks you (and the client) when a fare
-hits the target. Each client also gets a private link to a live status page.
+specific routes/dates for clients, and FareWatch checks Duffel + LiteAPI every
+couple of hours, records the price, and emails + Slacks you (and the client)
+when a fare hits the target. Each client also gets a private link to a live
+status page.
 
 Deployed at **https://farewatch.annaknoll.com** (Render).
 
 > **Hotel monitoring is live** (since 2026-08-21), built on **LiteAPI** — Duffel
 > Stays was abandoned after it turned out to be sales-gated. Hotel rates are
 > tracked **per night**, and alerts fire on the cheapest **refundable** rate.
+
+> **LiteAPI flights are live too** (since 2026-09-07), checked alongside Duffel
+> on every watch. Duffel doesn't return United or Delta even on their own
+> fortress-hub routes; LiteAPI does. Both are queried every check and the
+> cheaper price wins per stop tier — see `flight_merge.py`.
 
 ---
 
@@ -20,7 +26,7 @@ FareWatch is two programs that share one database — they never call each other
 | Part | File(s) | Runs | Job |
 |---|---|---|---|
 | **Web app** | `app.py` + `templates/` | Always on (gunicorn on Render) | The admin dashboard + the public client pages. Reads/writes the DB; renders pages. |
-| **Price checker** | `check_prices.py` | Every 2 hours (Render cron) | Looks up fares on Duffel, saves prices, sends alerts. |
+| **Price checker** | `check_prices.py` | Every 2 hours (Render cron) | Looks up fares on Duffel **and** LiteAPI (cheaper wins per tier), looks up hotel rates on LiteAPI, saves prices, sends alerts. |
 
 ```
             ┌─────────────┐         ┌──────────────┐
@@ -32,9 +38,9 @@ FareWatch is two programs that share one database — they never call each other
             ┌────────────────────────────────────┐
             │      Supabase (Postgres) DB         │
             └────────────────────────────────────┘
-                   ▲           ▲            ▲
-              Duffel (fares) SendGrid     Slack
-                            (email)     (webhook)
+                   ▲              ▲            ▲
+     Duffel + LiteAPI (fares)  SendGrid     Slack
+       LiteAPI (hotel rates)   (email)     (webhook)
 ```
 
 ---
@@ -56,9 +62,21 @@ FareWatch is two programs that share one database — they never call each other
   (`_worst_leg_stops`), so one stop each way is a 1-stop trip, not a 2-stop one.
   Handles rate limits by honouring Duffel's `ratelimit-reset` Unix-timestamp
   header with up to 6 retries.
+- `flight_prices.py` — the same search, via **LiteAPI**. Added to cover United
+  and Delta, which Duffel doesn't return even on their own fortress-hub routes.
+  `get_lowest_fare_liteapi(...)` returns the identical shape as
+  `duffel.get_lowest_fare` so the two are drop-in comparable. Guards against
+  LiteAPI's sandbox silently answering for the production key
+  (`_is_sandbox_response`).
+- `flight_merge.py` — combines a Duffel result and a LiteAPI result into one:
+  every watch queries both providers each check, and the cheaper price wins per
+  stop tier (tagged `source`: `"duffel"` or `"liteapi"`). Only compares
+  numerically when both sides report the same currency.
 - `alerts.py` — notifications: client fare-drop email (SendGrid), Slack message
   (webhook), and internal error email. Currency is passed through from Duffel
-  (not assumed to be USD).
+  (not assumed to be USD). The Google Flights link is built from the winning
+  fare's own departure/return dates and passenger count (a free-text query with
+  only one date silently gets a Google-invented return ~4 days later).
 - `usage.py` — powers the `/usage` page (SendGrid / Duffel / Supabase / Render
   consumption).
 - `hotel_prices.py` — hotel rates via **LiteAPI**. `get_hotel_rate_pair()` returns
@@ -108,7 +126,12 @@ trends), `add_watch.html`. Styling is one file: `static/style.css`.
   2+ series drop and the 1-stop series appear. Also stores `stop_tier_details`
   (JSON, per-tier flight details for the expandable fare-options table) and
   `date_prices` (JSON: cheapest fare per departure date in the window, for the
-  "cheapest day to fly" trend). This is the dataset behind the price charts, the
+  "cheapest day to fly" trend). `source` (added 2026-09-07) records which
+  provider — `duffel` or `liteapi` — won the overall-cheapest fare that check;
+  rows from before that migration default to `duffel`, the only source until
+  then. Each stop tier's own winning source rides inside `stop_tier_details`
+  instead of more columns, since a nonstop and a 1-stop can come from different
+  providers on the same check. This is the dataset behind the price charts, the
   Trends page, and any future trend / stop-quality analysis.
 - **`sent_alerts`** — a log of alerts sent (drives the "alerts sent" metric).
   Alerts fire per **stop tier**: when any of nonstop / 1-stop / 2+ hits a new low
@@ -138,7 +161,7 @@ All configuration is via env vars (local: `.env`; production: Render dashboard).
 | `SUPABASE_URL` | Supabase project URL (local stack: `http://127.0.0.1:54321`). |
 | `SUPABASE_ANON_KEY` | Supabase anon/public key. |
 | `DUFFEL_API_TOKEN` | Duffel API token. **Test** token locally, **live** in prod. |
-| `LITEAPI_KEY` | LiteAPI key for hotel rates. **Sandbox** locally, **production** (private key) in prod. Web needs it for the picker, cron for checking. |
+| `LITEAPI_KEY` | LiteAPI key for hotel **and flight** rates (same key, both enabled on it). **Sandbox** locally, **production** (private key) in prod. Web needs it for the hotel picker, cron for checking both. |
 | `SENDGRID_API_KEY` | SendGrid key for sending alert emails. |
 | `SENDER_EMAIL` | The verified "from" address (also gets a copy of every alert). |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook for alerts. Optional — blank = skip. |
@@ -211,10 +234,13 @@ linked to the prod Supabase project).
 
 ## Test vs production at a glance
 
-| | Database | Duffel token |
-|---|---|---|
-| **Local dev** | local Supabase stack | `duffel_test_…` |
-| **Production** | Supabase cloud project | `duffel_live_…` |
+| | Database | Duffel token | LiteAPI key |
+|---|---|---|---|
+| **Local dev** | local Supabase stack | `duffel_test_…` | LiteAPI **sandbox** key |
+| **Production** | Supabase cloud project | `duffel_live_…` | LiteAPI **production** key |
 
 Keeping these separate is why local experiments and manual `check_prices.py`
-runs can't pollute real client-facing data.
+runs can't pollute real client-facing data. LiteAPI's environment is decided by
+**which key you use, not the endpoint** — both hit the same URL, so a leftover
+sandbox key returns sandbox data with no error to signal it (`flight_prices.py`
+checks for this explicitly; see `_is_sandbox_response`).
