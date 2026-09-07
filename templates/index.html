@@ -13,7 +13,12 @@
     </summary>
     <div class="tier-detail">
       {% if detail %}
-        {% if detail.airline %}<div class="td-airline">{{ detail.airline }}</div>{% endif %}
+        {% if detail.airline %}
+        <div class="td-airline">
+          {{ detail.airline }}
+          {% if detail.source %}<span class="td-source">via {{ 'LiteAPI' if detail.source == 'liteapi' else 'Duffel' }}</span>{% endif %}
+        </div>
+        {% endif %}
         {% if detail.returning_at %}
           <div>out {{ detail.flight_number }} · {{ detail.departing_at|fmtdt }}</div>
           <div>return {{ detail.return_flight_number }} · {{ detail.returning_at|fmtdt }}</div>
@@ -63,9 +68,10 @@
     </div>
 
     {% if hit_target and not w.booking_reference %}
+    {% set from_liteapi = lp and lp.source == 'liteapi' %}
     {% if lp and lp.flight_number %}
     <div class="book-flight-info">
-      <span class="bfi-label">search on Duffel:</span>
+      <span class="bfi-label">{{ 'via LiteAPI — not in Duffel:' if from_liteapi else 'search on Duffel:' }}</span>
       <span class="bfi-route">{{ w.origin }} → {{ w.destination }}</span>
       · depart <strong>{{ lp.departing_at[:10] }}{% if lp.departing_at[11:16] %} at {{ lp.departing_at[11:16] }}{% endif %}</strong>
       · {{ lp.flight_number }}{% if lp.airline %} ({{ lp.airline }}){% endif %}
@@ -75,10 +81,15 @@
         · return <strong>{{ lp.returning_at[:10] }}{% if lp.returning_at[11:16] %} at {{ lp.returning_at[11:16] }}{% endif %}</strong>
         {% if lp.return_flight_number %} · {{ lp.return_flight_number }}{% endif %}
       {% endif %}
+      {% if from_liteapi %}
+        <div class="bfi-note">LiteAPI has no self-serve booking link — search {{ lp.airline or 'the airline' }} directly.</div>
+      {% endif %}
     </div>
     {% endif %}
     <div class="card-book-actions">
-      <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
+      {% if not from_liteapi %}
+        <a href="https://app.duffel.com" target="_blank" class="btn-book-primary">book on Duffel →</a>
+      {% endif %}
       <button class="btn-book-secondary" onclick="toggleBook('{{ w.id }}', this)">mark as booked</button>
     </div>
     {% endif %}

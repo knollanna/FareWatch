@@ -385,6 +385,7 @@ input, select { font-family: var(--font-sans); }
   line-height: 1.7;
 }
 .tier-detail .td-airline { color: var(--text); font-weight: 500; }
+.tier-detail .td-source { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 4px; }
 .tier-detail .td-none { font-style: italic; }
 .price-target-label {
   font-size: 12px;
@@ -483,6 +484,7 @@ input, select { font-family: var(--font-sans); }
 .book-flight-info .bfi-label { font-weight: 600; color: var(--accent); }
 .book-flight-info .bfi-route { font-family: var(--font-mono); color: var(--text); }
 .book-flight-info strong { color: var(--text); font-weight: 600; }
+.book-flight-info .bfi-note { margin-top: 4px; font-style: italic; }
 
 /* ─── Add watch button + inline form ─────────────────────────────────────────── */
 .add-watch-btn {

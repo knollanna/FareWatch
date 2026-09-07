@@ -24,6 +24,8 @@ import datetime
 from dotenv import load_dotenv
 from supabase import create_client
 from duffel import get_lowest_fare
+from flight_prices import get_lowest_fare_liteapi
+from flight_merge import merge_flight_results
 from hotel_prices import get_hotel_rate_pair
 from alerts import (
     send_alert, send_error_alert, send_slack_alert,
@@ -128,7 +130,7 @@ def check_all_watches():
         trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
         print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
-        price, currency, flight_details, fetch_error, stop_tiers, date_prices = get_lowest_fare(
+        fare_kwargs = dict(
             origin=watch["origin"],
             destination=watch["destination"],
             date_from=watch["date_from"],
@@ -137,6 +139,11 @@ def check_all_watches():
             trip_type=watch.get("trip_type", "one_way"),
             return_date_from=watch.get("return_date_from"),
             return_date_to=watch.get("return_date_to"),
+        )
+        duffel_result = get_lowest_fare(**fare_kwargs)
+        liteapi_result = get_lowest_fare_liteapi(**fare_kwargs)
+        price, currency, flight_details, fetch_error, stop_tiers, date_prices, source = (
+            merge_flight_results(duffel_result, liteapi_result)
         )
 
         if price is None:
@@ -177,6 +184,8 @@ def check_all_watches():
             "stop_tier_details": stop_tiers.get("details"),
             # Cheapest fare per departure date in the window (trend distribution)
             "date_prices": date_prices or None,
+            # Which provider won the overall-cheapest fare this check.
+            "source": source,
         }
         if flight_details:
             history_row["stops_outbound"] = flight_details.get("stops_outbound")
@@ -191,7 +200,7 @@ def check_all_watches():
 
         target = float(watch["target_price"])
         status = "TARGET MET ✓" if price <= target else "above target"
-        print(f"  Lowest fare: {currency} {price:.2f} (target: {currency} {target:.2f}) — {status}")
+        print(f"  Lowest fare: {currency} {price:.2f} (target: {currency} {target:.2f}) — {status} [{source}]")
         if flight_details:
             print(f"  Flight: {flight_details['flight_number']} | {flight_details['trip_type']} | Departs {flight_details['departing_at']}")
 
