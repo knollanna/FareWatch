@@ -40,9 +40,23 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 NONSTOP_NOTE = ("This route has no nonstop service on these dates, so this is the cheapest option rather than a direct flight.")
 
 
-def _google_flights_url(origin, destination, date_from, passengers, exact_date=None):
+def _google_flights_url(origin, destination, date_from, passengers, exact_date=None, return_date=None):
+    """Google Flights link for the winning fare's own dates and party size.
+
+    Google's /travel/flights?q= free-text parser is picky about phrasing: give
+    it only one date and it silently invents a return ~4 days later rather than
+    searching one-way (confirmed by testing against the live parser). "for N
+    adults departing X returning Y" — the same phrasing Google's own "Track
+    prices" blurb uses — parses both dates and the passenger count correctly;
+    omitting "returning" gives a genuine one-way search. Without exact_date/
+    return_date (older stored alerts), falls back to date_from one-way, same
+    as before.
+    """
     departure = exact_date[:10] if exact_date else date_from
-    q = f"{origin} to {destination} {departure}"
+    pax = f"{passengers} adult{'s' if passengers != 1 else ''}"
+    q = f"{origin} to {destination} for {pax} departing {departure}"
+    if return_date:
+        q += f" returning {return_date[:10]}"
     return f"https://www.google.com/travel/flights?q={urllib.parse.quote(q)}&curr=USD"
 
 
@@ -156,8 +170,11 @@ def _build_tier_alert_html(watch, improved, passengers, currency,
   </div>"""
 
     best = min(improved, key=lambda t: t["price"])
-    exact_date = (best.get("detail") or {}).get("departing_at")
-    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
+    best_detail = best.get("detail") or {}
+    exact_date = best_detail.get("departing_at")
+    return_date = best_detail.get("returning_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers,
+                                     exact_date, return_date)
 
     client_token = watch.get("client_token")
     dash = ""
@@ -217,8 +234,11 @@ def _build_tier_alert_text(watch, improved, passengers, currency,
         lines += [NONSTOP_NOTE, ""]
 
     best = min(improved, key=lambda t: t["price"])
-    exact_date = (best.get("detail") or {}).get("departing_at")
-    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
+    best_detail = best.get("detail") or {}
+    exact_date = best_detail.get("departing_at")
+    return_date = best_detail.get("returning_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers,
+                                     exact_date, return_date)
 
     lines += [
         f"Travel window: {watch['date_from']} – {watch['date_to']}",
@@ -333,8 +353,11 @@ def send_slack_alert(watch, improved, passengers, currency="USD",
         lines.append(f"_{NONSTOP_NOTE}_")
 
     best = min(improved, key=lambda t: t["price"])
-    exact_date = (best.get("detail") or {}).get("departing_at")
-    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers, exact_date)
+    best_detail = best.get("detail") or {}
+    exact_date = best_detail.get("departing_at")
+    return_date = best_detail.get("returning_at")
+    google_url = _google_flights_url(origin, destination, watch["date_from"], passengers,
+                                     exact_date, return_date)
 
     payload = {
         "blocks": [
