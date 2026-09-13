@@ -23,6 +23,8 @@ import time
 import datetime
 from dotenv import load_dotenv
 from supabase import create_client
+from postgrest.exceptions import APIError
+from pydantic import ValidationError
 from duffel import get_lowest_fare
 from flight_prices import get_lowest_fare_liteapi
 from flight_merge import merge_flight_results
@@ -40,15 +42,57 @@ supabase = create_client(
 )
 
 
+def _execute_with_retry(query, max_retries=3, base_wait=1.0):
+    """Run a Supabase query's .execute(), retrying on a transient failure in
+    Supabase's own infrastructure rather than crashing the whole cron run.
+
+    Supabase's API Gateway has had repeated outages (19 in the last 30 days
+    per status.supabase.com, as of 2026-09) — a Gateway Timeout showed up
+    twice in one cron run on 2026-09-13, twelve seconds apart, once as each
+    of the two shapes below. Both are the same underlying event.
+
+    Two exception shapes, both treated as transient and retried:
+      * postgrest.exceptions.APIError with a numeric code >= 500 — the
+        client library parsed the error body cleanly.
+      * pydantic.ValidationError — reachable ONLY from inside postgrest's own
+        error-parsing code (request_builder.py calls this while building the
+        APIError above), so it only ever fires while handling a non-2xx
+        response in the first place. Confirmed against the actual traceback:
+        a Gateway Timeout body that didn't match postgrest's expected
+        {code, message, details, hint} shape crashed pydantic instead of
+        producing a clean APIError — cosmetically different, same event.
+
+    Anything else (a real constraint violation, a bad query) re-raises
+    immediately on the first try — those are application bugs, and retrying
+    would just delay a failure that should fail fast.
+    """
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return query.execute()
+        except APIError as e:
+            code = str(getattr(e, "code", "") or "")
+            if not (code.isdigit() and int(code) >= 500):
+                raise  # not a transient infra error — don't mask it with a retry
+            last_exc = e
+        except ValidationError as e:
+            last_exc = e  # only reachable via postgrest's own error-handling path
+        if attempt < max_retries:
+            wait = min(base_wait * (2 ** attempt), 10.0)
+            print(f"  [supabase] Transient error ({last_exc.__class__.__name__}), "
+                  f"retrying in {wait:.1f}s (attempt {attempt + 1}/{max_retries})...")
+            time.sleep(wait)
+    raise last_exc
+
+
 def get_previous_lowest(watch_id):
     """Return the lowest price ever recorded for this watch, or None if no history."""
-    result = (
+    result = _execute_with_retry(
         supabase.table("price_history")
         .select("price")
         .eq("watch_id", watch_id)
         .order("price", desc=False)
         .limit(1)
-        .execute()
     )
     if result.data:
         return float(result.data[0]["price"])
@@ -86,7 +130,7 @@ def get_alerted_tier_lows(watch_id, params_changed_at=None):
         )
         if params_changed_at:
             q = q.gte("sent_at", params_changed_at)
-        r = q.order(col, desc=False).limit(1).execute().data
+        r = _execute_with_retry(q.order(col, desc=False).limit(1)).data
         return float(r[0][col]) if r else None
 
     return {k: tier_min(c) for k, c in cols.items()}
@@ -94,12 +138,12 @@ def get_alerted_tier_lows(watch_id, params_changed_at=None):
 
 def set_error(watch_id, message):
     """Store a human-readable failure reason on the watch (shown in the UI)."""
-    supabase.table("watches").update({"last_error": message}).eq("id", watch_id).execute()
+    _execute_with_retry(supabase.table("watches").update({"last_error": message}).eq("id", watch_id))
 
 
 def clear_error(watch_id):
     """Clear a watch's stored error after a successful check."""
-    supabase.table("watches").update({"last_error": None}).eq("id", watch_id).execute()
+    _execute_with_retry(supabase.table("watches").update({"last_error": None}).eq("id", watch_id))
 
 
 def check_all_watches():
@@ -108,15 +152,13 @@ def check_all_watches():
     See the module docstring for the full flow. Prints a per-watch summary and a
     final error roll-up to the console (visible in the Render cron logs).
     """
-    watches = (
+    watches = _execute_with_retry(
         supabase.table("watches")
         .select("*")
         .eq("is_active", True)
         .eq("is_paused", False)
         .eq("is_archived", False)
-        .execute()
-        .data
-    )
+    ).data
 
     if not watches:
         print("No active watches found.")
@@ -196,7 +238,7 @@ def check_all_watches():
             history_row["departing_at"] = flight_details.get("departing_at")
             history_row["returning_at"] = flight_details.get("returning_at")
             history_row["return_flight_number"] = flight_details.get("return_flight_number")
-        supabase.table("price_history").insert(history_row).execute()
+        _execute_with_retry(supabase.table("price_history").insert(history_row))
 
         target = float(watch["target_price"])
         status = "TARGET MET ✓" if price <= target else "above target"
@@ -284,7 +326,7 @@ def check_all_watches():
                 alert_row = {"watch_id": watch["id"], "price": price}
                 for t in improved:
                     alert_row[t["alerted_col"]] = t["price"]
-                supabase.table("sent_alerts").insert(alert_row).execute()
+                _execute_with_retry(supabase.table("sent_alerts").insert(alert_row))
         elif nonstop_only and not nonstop_unavailable:
             ns = stop_tiers.get("price_nonstop")
             if ns is not None and ns > target:
@@ -334,12 +376,12 @@ def _is_meaningful_drop(new_low, previous_low):
 
 def set_hotel_error(hotel_watch_id, message):
     """Store a human-readable failure reason on a hotel watch (shown in the UI)."""
-    supabase.table("hotel_watches").update({"last_error": message}).eq("id", hotel_watch_id).execute()
+    _execute_with_retry(supabase.table("hotel_watches").update({"last_error": message}).eq("id", hotel_watch_id))
 
 
 def clear_hotel_error(hotel_watch_id):
     """Clear a hotel watch's stored error after a successful check."""
-    supabase.table("hotel_watches").update({"last_error": None}).eq("id", hotel_watch_id).execute()
+    _execute_with_retry(supabase.table("hotel_watches").update({"last_error": None}).eq("id", hotel_watch_id))
 
 
 def get_hotel_alerted_low(hotel_watch_id):
@@ -348,15 +390,13 @@ def get_hotel_alerted_low(hotel_watch_id):
     baseline as flights: a failed send never advances it, so the alert is retried
     rather than lost. Returns float or None.
     """
-    r = (
+    r = _execute_with_retry(
         supabase.table("sent_alerts")
         .select("price")
         .eq("hotel_watch_id", hotel_watch_id)
         .order("price", desc=False)
         .limit(1)
-        .execute()
-        .data
-    )
+    ).data
     return float(r[0]["price"]) if r else None
 
 
@@ -365,13 +405,11 @@ def check_all_hotel_watches():
     it in hotel_price_history. Prices tracked are net TOTAL, plus derived per-night
     and per-night-per-person (the unit the target is set in). No alerts yet.
     """
-    hotels = (
+    hotels = _execute_with_retry(
         supabase.table("hotel_watches")
         .select("*")
         .eq("is_active", True)
-        .execute()
-        .data
-    )
+    ).data
 
     if not hotels:
         print("No active hotel watches found.")
@@ -423,9 +461,11 @@ def check_all_hotel_watches():
                 # so the UI isn't misleading, and bump the not-found counter.
                 msg = f"No rooms for {name} ({hw['check_in']} → {hw['check_out']})"
                 cnt = (hw.get("consecutive_room_not_found") or 0) + 1
-                supabase.table("hotel_watches").update(
-                    {"consecutive_room_not_found": cnt}
-                ).eq("id", hw["id"]).execute()
+                _execute_with_retry(
+                    supabase.table("hotel_watches").update(
+                        {"consecutive_room_not_found": cnt}
+                    ).eq("id", hw["id"])
+                )
             print(f"  ⚠️  {msg}")
             # Email Anna only on a new/changed error (avoid repeat spam), same as flights.
             if hw.get("last_error") != msg:
@@ -440,11 +480,13 @@ def check_all_hotel_watches():
         # Success — clear any prior error and reset the not-found counter.
         clear_hotel_error(hw["id"])
         if hw.get("consecutive_room_not_found"):
-            supabase.table("hotel_watches").update(
-                {"consecutive_room_not_found": 0}
-            ).eq("id", hw["id"]).execute()
+            _execute_with_retry(
+                supabase.table("hotel_watches").update(
+                    {"consecutive_room_not_found": 0}
+                ).eq("id", hw["id"])
+            )
 
-        supabase.table("hotel_price_history").insert({
+        _execute_with_retry(supabase.table("hotel_price_history").insert({
             "hotel_watch_id": hw["id"],
             "total_amount": rate["total_amount"],
             "per_night_amount": rate["per_night_amount"],
@@ -465,7 +507,7 @@ def check_all_hotel_watches():
             "refundable_rate_name": (refundable or {}).get("rate_name"),
             "refundable_board_name": (refundable or {}).get("board_name"),
             "refundable_board_type": (refundable or {}).get("board_type"),
-        }).execute()
+        }))
 
         # Tracked unit is the nightly ROOM rate — hotels sell room-nights.
         target = float(hw["target_price_per_night"])
@@ -515,9 +557,9 @@ def check_all_hotel_watches():
             except Exception as e:
                 print(f"  💬 Hotel Slack failed: {e}")
             if email_ok or slack_ok:
-                supabase.table("sent_alerts").insert(
+                _execute_with_retry(supabase.table("sent_alerts").insert(
                     {"hotel_watch_id": hw["id"], "price": alert_nightly}
-                ).execute()
+                ))
         elif alert_nightly > target:
             print(f"  refundable {alert_nightly:.2f} is above the {target:.2f} target — no alert.")
         elif alerted_low is not None:
