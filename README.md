@@ -55,7 +55,9 @@ FareWatch is two programs that share one database — they never call each other
   — so clients never hit a 404 just because their watches are paused), and the
   `/usage` page.
 - `check_prices.py` — the cron job. Fetches fares, stores price history, fires
-  alerts. The "automation" of FareWatch.
+  alerts. The "automation" of FareWatch. Every Supabase call retries on a
+  transient Gateway Timeout (`_execute_with_retry`) rather than crashing the
+  run — Supabase's own API Gateway has been unreliable lately.
 - `duffel.py` — flights integration. `get_lowest_fare(...)` searches Duffel and
   returns the cheapest fare + flight details, plus the cheapest price at each
   stop level (nonstop / 1-stop / 2+). A round trip is tiered by its **worst leg**

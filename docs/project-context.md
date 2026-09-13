@@ -422,6 +422,28 @@ Standing rules — each of these silently breaks authentication if changed:
     it and would have misfired on Duffel-only alerts too — but it surfaced
     because #28 put a real client alert in front of Anna the same day.
 
+30. **Supabase Gateway Timeouts crashed the cron; every `.execute()` call now
+    retries (2026-09-13).** A single cron run threw two different exceptions
+    twelve seconds apart — one from `check_all_watches`, one from
+    `check_all_hotel_watches` — both traced to the same event: Supabase's own
+    API Gateway returning a 504 (their status page showed 19 outages in the
+    prior 30 days, an ongoing platform issue, not specific to this project).
+    The two exceptions looked unrelated only because `postgrest`'s client
+    library expects every error body to have `{code, message, details, hint}`;
+    one timeout's body happened to match that shape and raised a clean
+    `postgrest.exceptions.APIError`, the other didn't and crashed the
+    library's own error-parsing code with a `pydantic.ValidationError`
+    instead — same event, cosmetically different failure depending on exactly
+    how Supabase's gateway phrased the timeout. Fixed with
+    `check_prices.py::_execute_with_retry`, wrapping all 15 `.execute()` call
+    sites in the file: retries up to 3 times with exponential backoff (1s,
+    2s, 4s) on either exception shape when it looks like a 5xx-class failure,
+    re-raises immediately for anything else (a real bad query or constraint
+    violation shouldn't be masked by a retry). Verified against mocked
+    failure sequences before shipping: retries and recovers from repeated
+    504s, retries and recovers from the `ValidationError` shape, does not
+    retry a genuine 400, and re-raises cleanly once retries are exhausted.
+
 ---
 
 ## 7. Key decisions & gotchas
@@ -768,6 +790,12 @@ for United and Delta. A same-day round-trip bug (missing `"direction"` on
 each requested leg, silently dropping the return leg) was found and fixed the
 same day (§7) — verified live, round-trip results now carry a real return
 date.
+
+**Cron hardened against Supabase's own outages (2026-09-13, §6 #30):** every
+`check_prices.py` database call now retries a transient Gateway Timeout
+instead of crashing the run. Not a FareWatch bug — Supabase's API Gateway has
+had repeated platform-wide incidents — but the cron shouldn't go down every
+time it does.
 
 The price-history **chart is admin-only** — deliberately, per the LiteAPI storage
 terms in §7; the client page shows a "lowest observed" card with the live-rates
