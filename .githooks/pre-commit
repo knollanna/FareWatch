@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks a commit that stages a real secret. Logic lives in
+# check_secrets.py — see that file for the why.
+#
+# This only runs if core.hooksPath points here. A fresh clone needs to
+# opt in once:
+#   git config core.hooksPath .githooks
+
+exec python3 "$(git rev-parse --show-toplevel)/check_secrets.py"

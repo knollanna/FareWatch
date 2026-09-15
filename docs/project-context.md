@@ -444,6 +444,26 @@ Standing rules — each of these silently breaks authentication if changed:
     504s, retries and recovers from the `ValidationError` shape, does not
     retry a genuine 400, and re-raises cleanly once retries are exhausted.
 
+31. **`check_secrets.py` — a pre-commit hook against the class of bug that
+    put the app password in this repo (2026-09-15).** The app-password
+    incident (§7) was fixed at the value level — rotated, redacted from
+    history — but nothing stopped the *next* hardcoded credential from
+    landing the same way. Three signals, any one of which blocks a commit:
+    a known secret-format pattern (AWS/Slack/Stripe/GitHub/JWT/PEM/Duffel
+    live-test token); a credential-shaped variable assigned a literal in
+    code instead of read from the environment; a credential keyword with a
+    nearby quoted value that's also secret-shaped (not a field name, route
+    pattern, or filename) and clears an entropy floor. Checks only ADDED
+    lines in the staged diff; staging `.env` itself is a separate,
+    unconditional block. Verified against zero false positives across every
+    line of the tracked tree before shipping — the first two drafts weren't
+    that clean: a MIME type sitting far from an unrelated `{SENDGRID_API_KEY}`
+    interpolation on the same line read as suspicious until the keyword/quote
+    proximity was bounded, and an ordinary word ("`watches`") near "token"
+    read as a hit until shape *and* entropy were both required, not just
+    keyword-proximity. Wired as `.githooks/pre-commit` — needs `git config
+    core.hooksPath .githooks` once per clone.
+
 ---
 
 ## 7. Key decisions & gotchas

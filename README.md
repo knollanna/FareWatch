@@ -99,6 +99,11 @@ trends), `add_watch.html`. Styling is one file: `static/style.css`.
   `static/airports.json` (used by the autocomplete). Run once; re-run only to
   refresh.
 - `generate_tokens.py` — backfills client tokens for existing watches.
+- `check_secrets.py` — pre-commit check, blocks a commit staging a real
+  secret (known key formats, a hardcoded credential variable, or a
+  credential keyword next to a high-entropy value). Wired as
+  `.githooks/pre-commit` — `git config core.hooksPath .githooks` once per
+  clone to activate it.
 
 **Config & infra**
 - `requirements.txt` — Python dependencies.
