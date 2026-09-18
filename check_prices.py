@@ -146,6 +146,35 @@ def clear_error(watch_id):
     _execute_with_retry(supabase.table("watches").update({"last_error": None}).eq("id", watch_id))
 
 
+# An alert has to be worth an email. The merged Duffel + LiteAPI results return
+# different offers a few cents apart from one check to the next (the cheapest
+# can flip between providers and itineraries), and the strict "cur < prev" rule fired on
+# every one of them: EWR/JFK -> MIA alerted several times a day reading
+# "$238/person down from $238" (2026-09). Same failure hotels had in August.
+#
+# A tier's new low must beat that tier's last ALERTED low by 5% AND by at least
+# $10 per person, whichever is larger. Prices here are totals for all
+# passengers, so the per-person floor scales with the passenger count. The first
+# alert for a tier still fires on hitting target — there is no baseline to beat.
+FLIGHT_MIN_DROP_PCT = 0.05     # 5% off the tier's previous alerted low
+FLIGHT_MIN_DROP_PP = 10.00     # ...and at least this much per person
+
+
+def _fare_drop_needed(previous_low, passengers):
+    """Minimum total drop below `previous_low` that counts as a new low."""
+    return max(previous_low * FLIGHT_MIN_DROP_PCT,
+               FLIGHT_MIN_DROP_PP * max(int(passengers or 1), 1))
+
+
+def _is_meaningful_fare_drop(new_low, previous_low, passengers):
+    """True if `new_low` (a total) beats `previous_low` by enough to alert."""
+    if previous_low is None:
+        return True
+    # Compare at cents: 238.41 - 226.49 is 11.9199... in floating point, which
+    # would otherwise miss a drop that meets the requirement exactly.
+    return round(previous_low - new_low, 2) >= round(_fare_drop_needed(previous_low, passengers), 2)
+
+
 def check_all_watches():
     """Check every active watch once: fetch fare, store it, alert if warranted.
 
@@ -281,15 +310,22 @@ def check_all_watches():
             if cur is None or cur > target:
                 continue
             prev = prev_tier_lows.get(detail_key)
-            if prev is None or cur < prev:
-                improved.append({
-                    "label": label,
-                    "price": cur,
-                    "previous_low": prev,
-                    "detail": tier_details.get(detail_key),
-                    # Column on sent_alerts to record this tier's alerted price.
-                    "alerted_col": f"alerted_{price_key}",
-                })
+            if not _is_meaningful_fare_drop(cur, prev, watch["passengers"]):
+                if cur < prev:
+                    pax = max(int(watch["passengers"] or 1), 1)
+                    print(f"  {label}: {currency} {cur / pax:.2f}/person is only "
+                          f"{(prev - cur) / pax:.2f} below the last alerted "
+                          f"{prev / pax:.2f} (need "
+                          f"{_fare_drop_needed(prev, pax) / pax:.2f}) — not alerting.")
+                continue
+            improved.append({
+                "label": label,
+                "price": cur,
+                "previous_low": prev,
+                "detail": tier_details.get(detail_key),
+                # Column on sent_alerts to record this tier's alerted price.
+                "alerted_col": f"alerted_{price_key}",
+            })
 
         if improved and nonstop_unavailable:
             improved = [min(improved, key=lambda t: t["price"])]

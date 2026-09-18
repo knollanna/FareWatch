@@ -155,7 +155,7 @@ def _build_tier_alert_html(watch, improved, passengers, currency,
         pp = t["price"] / passengers
         if t["previous_low"] is not None:
             note = (f'<span style="color:#2a7a2a;font-weight:normal;font-size:13px;">'
-                    f' ▼ down from {currency} {float(t["previous_low"]) / passengers:,.0f}/person</span>')
+                    f' ▼ down from {currency} {float(t["previous_low"]) / passengers:,.2f}/person</span>')
         else:
             note = '<span style="color:#2a7a2a;font-weight:normal;font-size:13px;"> (new!)</span>'
         flight = _tier_flight_line(t["detail"])
@@ -164,7 +164,7 @@ def _build_tier_alert_html(watch, improved, passengers, currency,
         stops_html = f'<div style="font-size:12px;color:#888;">{stops}</div>' if stops else ""
         blocks += f"""
   <div style="border-left:3px solid #1D9E75;background:#f6fbf9;padding:8px 14px;margin:12px 0;">
-    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{t['label']} — {currency} {pp:,.0f}/person{note}</div>
+    <div style="font-size:16px;font-weight:bold;color:#1D9E75;">{t['label']} — {currency} {pp:,.2f}/person{note}</div>
     {flight_html}
     {stops_html}
   </div>"""
@@ -193,7 +193,7 @@ def _build_tier_alert_html(watch, improved, passengers, currency,
   <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px;color:#555;">
     <tr><td style="padding:4px 0;">Travel window</td><td style="padding:4px 0;text-align:right;">{watch['date_from']} – {watch['date_to']}</td></tr>
     <tr><td style="padding:4px 0;">Passengers</td><td style="padding:4px 0;text-align:right;">{pax_label}</td></tr>
-    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target_pp:,.0f}/person</td></tr>
+    <tr><td style="padding:4px 0;">Your target</td><td style="padding:4px 0;text-align:right;">{currency} {target_pp:,.2f}/person</td></tr>
   </table>
   <p style="margin:16px 0 4px;"><a href="{google_url}" style="background:#1a73e8;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold;">Search on Google Flights →</a></p>
   <p>Fares at this price can disappear quickly — <strong>reply to this email</strong> and I'll get your booking sorted right away.</p>
@@ -219,10 +219,10 @@ def _build_tier_alert_text(watch, improved, passengers, currency,
     for t in improved:
         pp = t["price"] / passengers
         if t["previous_low"] is not None:
-            note = f" (down from {currency} {float(t['previous_low']) / passengers:,.0f}/person)"
+            note = f" (down from {currency} {float(t['previous_low']) / passengers:,.2f}/person)"
         else:
             note = " (new!)"
-        lines.append(f"{t['label']}: {currency} {pp:,.0f}/person{note}")
+        lines.append(f"{t['label']}: {currency} {pp:,.2f}/person{note}")
         fl = _tier_flight_line(t["detail"])
         st = _tier_stops_line(t["detail"])
         if fl:
@@ -243,7 +243,7 @@ def _build_tier_alert_text(watch, improved, passengers, currency,
     lines += [
         f"Travel window: {watch['date_from']} – {watch['date_to']}",
         f"Passengers: {passengers}",
-        f"Your target: {currency} {target_pp:,.0f}/person",
+        f"Your target: {currency} {target_pp:,.2f}/person",
         "",
         f"Search Google Flights: {google_url}",
         "",
@@ -274,7 +274,7 @@ def send_alert(watch, improved, passengers, currency="USD",
     if len(improved) == 1:
         t = improved[0]
         subject = (f"Fare alert: {origin} → {destination} — "
-                   f"{t['label'].lower()} {currency} {t['price'] / passengers:,.0f}/person")
+                   f"{t['label'].lower()} {currency} {t['price'] / passengers:,.2f}/person")
     else:
         subject = f"Fare alert: {origin} → {destination} — {len(improved)} new fare lows"
 
@@ -341,14 +341,14 @@ def send_slack_alert(watch, improved, passengers, currency="USD",
     for t in improved:
         pp = t["price"] / passengers
         if t["previous_low"] is not None:
-            note = f" ⬇ from ${float(t['previous_low']) / passengers:,.0f}"
+            note = f" ⬇ from ${float(t['previous_low']) / passengers:,.2f}"
         else:
             note = " _(new!)_"
         fl = _tier_flight_line(t["detail"])
         extra = f" · {fl}" if fl else ""
-        lines.append(f"*{t['label']}:* ${pp:,.0f}/person{note}{extra}")
+        lines.append(f"*{t['label']}:* ${pp:,.2f}/person{note}{extra}")
     lines.append(f"*Dates:* {dates} · {pax_label}")
-    lines.append(f"*Target:* ${target_pp:,.0f}/person")
+    lines.append(f"*Target:* ${target_pp:,.2f}/person")
     if nonstop_unavailable:
         lines.append(f"_{NONSTOP_NOTE}_")
 
