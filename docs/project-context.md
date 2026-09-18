@@ -633,8 +633,19 @@ Standing rules — each of these silently breaks authentication if changed:
   `MATERIAL_WATCH_FIELDS`, so toggling it bumps `params_changed_at` and resets the
   baseline — **it must therefore also be set in `edit_watch`'s `updates` dict**, or
   the epoch check compares False against None and re-epochs on every single edit.
-  Flights deliberately have **no** minimum-drop threshold (unlike hotels): fares
-  move in dollars, not pennies.
+  Flights now have a minimum-drop threshold too — see the next entry.
+- **Flight alerts need a MEANINGFUL drop (2026-09-18):** a tier's new low must
+  beat that tier's last alerted low by 5% AND at least $10 per person
+  (`FLIGHT_MIN_DROP_PCT` / `FLIGHT_MIN_DROP_PP` in check_prices.py; prices are
+  totals, so the floor scales with passengers). This reverses the 2026-08-22 call
+  that flights didn't need one because "fares move in dollars, not pennies".
+  They do on some routes: with Duffel and LiteAPI results merged, the cheapest
+  offer flips between providers and itineraries a few cents apart, and EWR/JFK →
+  MIA alerted several times a day reading "$238/person down from $238" — each a
+  real new low, by cents, displayed in whole dollars. Flight alerts now show two
+  decimals as well, so a small move reads as one. Compared at cents, so a drop of
+  exactly the requirement counts. First alert per tier still fires with no
+  baseline.
 - **Refundable and cheapest are tracked separately; alerts fire on REFUNDABLE only
   (2026-08-21).** The tracked "cheapest" rate flips between room types and between
   refundable and non-refundable, so it once swapped a refundable queen for a
