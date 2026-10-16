@@ -1,12 +1,15 @@
 """
 Notifications — how FareWatch tells you (and clients) about fares.
 
-Three public functions, all called from check_prices.py:
+Public functions, all called from check_prices.py:
   * send_alert(...)        — the client-facing fare EMAIL (via SendGrid).
                              Goes to the client and copies you (SENDER_EMAIL).
   * send_slack_alert(...)  — a Slack Block Kit message to your alerts channel
                              (via SLACK_WEBHOOK_URL). Skips silently if unset.
   * send_error_alert(...)  — an internal email to you only, when a watch errors.
+  * send_slack_error_alert(...) — the same notice to the alerts channel, so an
+                             error still reaches you if email is unavailable.
+                             (Hotels have a twin of each.)
 
 send_alert / send_slack_alert take a list of "improved tiers" — each stop level
 (nonstop / 1-stop / 2+) that just hit a NEW LOW at/below the target on this check.
@@ -445,6 +448,48 @@ def send_error_alert(watch, error_message):
         return False
 
 
+def _slack_escape(text, limit=None):
+    """Escape the three characters Slack treats as markup in mrkdwn text, after
+    optionally cutting to `limit` characters. Error messages carry provider
+    text, which can contain any of them and can be very long; Slack rejects a
+    section over 3000 characters outright, which would drop the notice. Cut
+    first, then escape, so a cut never lands inside an entity."""
+    text = str(text)
+    if limit and len(text) > limit:
+        text = text[:limit] + "…"
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _post_slack_notice(text, log_tag):
+    """Post a plain mrkdwn notice to the alerts channel. Skips silently
+    (returns False) if SLACK_WEBHOOK_URL is unset; never raises."""
+    if not SLACK_WEBHOOK_URL:
+        return False
+    payload = {"blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]}
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        if r.status_code == 200:
+            return True
+        print(f"  [{log_tag}] error {r.status_code}: {r.text[:120]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"  [{log_tag}] failed to send: {e}")
+        return False
+
+
+def send_slack_error_alert(watch, error_message):
+    """Slack twin of send_error_alert, same channel as the fare alerts."""
+    trip_type = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
+    lines = [
+        f"⚠️ *FareWatch error: {watch['origin']} → {watch['destination']}*",
+        f"*Client:* {_slack_escape(watch.get('client_name') or '—')}",
+        f"*Window:* {watch['date_from']} – {watch['date_to']} · {trip_type}",
+        f"*Error:* {_slack_escape(error_message, limit=500)}",
+        "_Still active; retried on the next run._",
+    ]
+    return _post_slack_notice("\n".join(lines), "slack-error")
+
+
 # ── Hotels (LiteAPI) ──────────────────────────────────────────────────────────
 # Hotel alerts mirror the flight ones but are simpler: a single tracked price
 # (net per-night-per-person) rather than per-stop tiers. Prices passed in are the
@@ -708,3 +753,15 @@ def send_hotel_error_alert(hotel_watch, error_message):
     except requests.exceptions.RequestException as e:
         print(f"  [hotel-error-alert] Failed to send: {e}")
         return False
+
+
+def send_slack_hotel_error_alert(hotel_watch, error_message):
+    """Slack twin of send_hotel_error_alert, same channel as the rate alerts."""
+    lines = [
+        f"⚠️ *FareWatch hotel error: {_slack_escape(hotel_watch['accommodation_name'])}*",
+        f"*Client:* {_slack_escape(hotel_watch.get('client_name') or '—')}",
+        f"*Stay:* {hotel_watch['check_in']} – {hotel_watch['check_out']}",
+        f"*Error:* {_slack_escape(error_message, limit=500)}",
+        "_Still active; retried on the next run._",
+    ]
+    return _post_slack_notice("\n".join(lines), "slack-hotel-error")
