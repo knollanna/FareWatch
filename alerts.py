@@ -448,10 +448,16 @@ def send_error_alert(watch, error_message):
         return False
 
 
-def _slack_escape(text):
-    """Escape the three characters Slack treats as markup in mrkdwn text.
-    Error messages can carry provider text, which may contain any of them."""
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def _slack_escape(text, limit=None):
+    """Escape the three characters Slack treats as markup in mrkdwn text, after
+    optionally cutting to `limit` characters. Error messages carry provider
+    text, which can contain any of them and can be very long; Slack rejects a
+    section over 3000 characters outright, which would drop the notice. Cut
+    first, then escape, so a cut never lands inside an entity."""
+    text = str(text)
+    if limit and len(text) > limit:
+        text = text[:limit] + "…"
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _post_slack_notice(text, log_tag):
@@ -478,7 +484,7 @@ def send_slack_error_alert(watch, error_message):
         f"⚠️ *FareWatch error: {watch['origin']} → {watch['destination']}*",
         f"*Client:* {_slack_escape(watch.get('client_name') or '—')}",
         f"*Window:* {watch['date_from']} – {watch['date_to']} · {trip_type}",
-        f"*Error:* {_slack_escape(error_message)}",
+        f"*Error:* {_slack_escape(error_message, limit=500)}",
         "_Still active; retried on the next run._",
     ]
     return _post_slack_notice("\n".join(lines), "slack-error")
@@ -755,7 +761,7 @@ def send_slack_hotel_error_alert(hotel_watch, error_message):
         f"⚠️ *FareWatch hotel error: {_slack_escape(hotel_watch['accommodation_name'])}*",
         f"*Client:* {_slack_escape(hotel_watch.get('client_name') or '—')}",
         f"*Stay:* {hotel_watch['check_in']} – {hotel_watch['check_out']}",
-        f"*Error:* {_slack_escape(error_message)}",
+        f"*Error:* {_slack_escape(error_message, limit=500)}",
         "_Still active; retried on the next run._",
     ]
     return _post_slack_notice("\n".join(lines), "slack-hotel-error")
