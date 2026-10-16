@@ -30,8 +30,9 @@ from flight_prices import get_lowest_fare_liteapi
 from flight_merge import merge_flight_results
 from hotel_prices import get_hotel_rate_pair
 from alerts import (
-    send_alert, send_error_alert, send_slack_alert,
+    send_alert, send_error_alert, send_slack_alert, send_slack_error_alert,
     send_hotel_alert, send_hotel_slack_alert, send_hotel_error_alert,
+    send_slack_hotel_error_alert,
 )
 
 load_dotenv()
@@ -223,11 +224,12 @@ def check_all_watches():
             else:
                 msg = f"No fares found for {route} ({watch['date_from']} – {watch['date_to']})"
             print(f"  ⚠️  ERROR: {msg}")
-            # Only email if this is a new or changed error (avoid repeat spam)
+            # Only notify if this is a new or changed error (avoid repeat spam)
             if watch.get("last_error") != msg:
                 send_error_alert(watch, msg)
+                send_slack_error_alert(watch, msg)
             else:
-                print(f"  [error-alert] Same error as last check — not re-sending email.")
+                print(f"  [error-alert] Same error as last check — not re-sending.")
             set_error(watch["id"], msg)
             errors.append(f"{route}: {msg}")
             print()
@@ -503,9 +505,10 @@ def check_all_hotel_watches():
                     ).eq("id", hw["id"])
                 )
             print(f"  ⚠️  {msg}")
-            # Email Anna only on a new/changed error (avoid repeat spam), same as flights.
+            # Notify Anna only on a new/changed error (avoid repeat spam), same as flights.
             if hw.get("last_error") != msg:
                 send_hotel_error_alert(hw, msg)
+                send_slack_hotel_error_alert(hw, msg)
             else:
                 print(f"  [hotel-error-alert] Same error as last check — not re-sending.")
             set_hotel_error(hw["id"], msg)

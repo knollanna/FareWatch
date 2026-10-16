@@ -65,7 +65,8 @@ External services: **Duffel** (flight fares), **LiteAPI/Nuitée** (flight fares
   primitive underneath it; `find_places(text_query)` → free-text hotel/place
   lookup for the picker; `find_hotels(city, country, hotel_name, place_id)` →
   LiteAPI hotel IDs. **No `rooms` parameter** — multi-room was retired (§7).
-- `alerts.py` — email (SendGrid) + Slack (Block Kit) + error emails, for flights
+- `alerts.py` — email (SendGrid) + Slack (Block Kit) + error notices (email **and**
+  Slack, added 2026-10-16 ahead of the SendGrid trial ending), for flights
   **and** hotels (`send_hotel_alert` / `send_hotel_slack_alert` / `send_hotel_error_alert`).
   `_google_flights_url` builds the flight link from the winning tier's own
   dates and passenger count — see §7 for why a single date isn't enough.

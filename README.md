@@ -75,7 +75,8 @@ FareWatch is two programs that share one database — they never call each other
   stop tier (tagged `source`: `"duffel"` or `"liteapi"`). Only compares
   numerically when both sides report the same currency.
 - `alerts.py` — notifications: client fare-drop email (SendGrid), Slack message
-  (webhook), and internal error email. Currency is passed through from Duffel
+  (webhook), and internal error notices (email and Slack, same channel as the
+  fare alerts). Currency is passed through from Duffel
   (not assumed to be USD). The Google Flights link is built from the winning
   fare's own departure/return dates and passenger count (a free-text query with
   only one date silently gets a Google-invented return ~4 days later).
