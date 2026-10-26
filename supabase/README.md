@@ -43,6 +43,18 @@ git add supabase/migrations/ && git commit -m "..."
 supabase db push               # runs any unapplied migrations on the cloud DB
 ```
 
+**A new table needs its own grants (since 2026-10-30).** Supabase no longer
+grants Data API access to new tables in `public`. Put this in the same migration
+that creates the table, or the app gets `permission denied` (42501):
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO anon, authenticated, service_role;
+```
+
+Full row access for `anon` is deliberate: the app uses the anon key for everything.
+`20261021000000_grant_data_api_access.sql` covers the five tables that existed
+before the change.
+
 Check both sides agree at any time:
 
 ```bash

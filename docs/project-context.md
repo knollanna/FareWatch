@@ -748,6 +748,14 @@ Standing rules — each of these silently breaks authentication if changed:
   ON SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL TABLES IN
   SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL SEQUENCES IN
   SCHEMA public TO anon, authenticated, service_role;"`. Not needed in prod.
+  **Superseded 2026-10-21** by migration `20261021000000_grant_data_api_access.sql`,
+  written ahead of Supabase ending automatic grants for new `public` tables on
+  2026-10-30 (a rebuilt schema, local or otherwise, would have had no grants). It
+  grants explicitly on the five existing tables, and every new table's migration
+  must carry its own `GRANT` (template in `supabase/README.md`). The SQL was
+  checked against prod in a rolled-back transaction; **a local `supabase db reset`
+  has not been run against it yet** (Docker was down), so confirm the first time
+  the local stack is up, and keep the manual workaround handy until then.
 - **Google Flights' `/travel/flights?q=` free-text parser needs both dates
   spelled out, or it invents one (2026-09-07).** Give it a single date and it
   silently assumes round trip and picks a return **~4 days later** with no
