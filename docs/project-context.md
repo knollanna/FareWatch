@@ -616,8 +616,17 @@ Standing rules — each of these silently breaks authentication if changed:
   badge plus "Stay has ended" instead of the stale error. The comparison is
   `check_out < today`, so a stay ending *today* is still checked — deliberate slack,
   since the cron runs UTC while hotel dates are local. Hotel watches still have no
-  `is_archived`, so this is the whole guard; the flights-side "auto-close past-date
-  watches" item is still open and the two would sensibly be built together.
+  `is_archived`, so this is the whole guard.
+- **Past-dated flight watches are skipped too (2026-10-26).** Flights never got the
+  hotel guard above. `check_all_watches` now skips a watch whose `date_to` (last
+  possible departure) is before today, before any provider call, and says so in the
+  log and the final `Done.` line. Until then an expired watch errored on every
+  provider on every run (Duffel `departure_date must be after …`, LiteAPI `search
+  validation error`) and posted a fresh Slack error notice whenever LiteAPI's wording
+  shifted between runs ("search validation error" vs "search input validation
+  error"), because the error dedup compares the full message string. Same slack as
+  hotels: a window ending *today* is still checked. The card keeps its "dates
+  passed" badge, which prompts the manual close; auto-archiving is still open (§9).
 - **Flights: `watches.nonstop_only` alerts on the Nonstop tier alone (2026-08-22).**
   Some clients will only fly direct, so a 1-stop fare under target is noise. The
   stop tiers were already tracked separately (`price_history.price_nonstop` /
@@ -865,9 +874,10 @@ this is worth settling before much more accrues. §7 has the wording to send.
 - **"Cheapest day to fly over time"** view on Trends — needs a week+ of
   `date_prices` history to be meaningful.
 - **Downsampling** old `price_history` — build when storage approaches a threshold.
-- **Auto-close past-date watches** (flights: currently a manual "close" button).
-  Hotels already *skip* past-dated stays in the checker (§7) but have no
-  `is_archived`; the two are worth building together.
+- **Auto-close past-date watches.** The checker now *skips* past-dated flight and
+  hotel watches (§7), but nothing closes them: flights still rely on the manual
+  "close" button, and hotels have no `is_archived`. The two are worth building
+  together.
 - **Deferred hotel scaffolding** (§7): `watch_mode=2` / `preferred_rate_code`,
   pinning a board type per watch, and a hotel edit route (no `params_changed_at`
   epoch for hotels until there is one).

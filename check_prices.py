@@ -196,9 +196,17 @@ def check_all_watches():
 
     print(f"Checking {len(watches)} active watch(es)...\n")
     errors = []
+    skipped_past = 0
+    today = datetime.date.today().isoformat()   # dates are stored as ISO strings
 
     for watch in watches:
         route = f"{watch['origin']} → {watch['destination']}"
+        # Last possible departure has passed: nothing to price, and every search would error.
+        if watch["date_to"] < today:
+            print(f"Skipping {route} — travel window ended {watch['date_to']}.")
+            skipped_past += 1
+            print()
+            continue
         trip_label = "round-trip" if watch.get("trip_type") == "round_trip" else "one-way"
         print(f"Checking {route} ({watch['date_from']} – {watch['date_to']}, {watch['passengers']} pax, {trip_label})...")
 
@@ -377,7 +385,8 @@ def check_all_watches():
 
         print()
 
-    print("Done.")
+    print("Done."
+          + (f" ({skipped_past} past-dated watch(es) skipped)" if skipped_past else ""))
     if errors:
         print(f"\n⚠️  {len(errors)} watch(es) had errors:")
         for e in errors:
